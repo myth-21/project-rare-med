@@ -23,7 +23,12 @@ import { ensureSeedData } from './utils/ensureSeed.js';
 
 const app = express();
 
-app.use(cors());
+app.use(
+  cors({
+    origin: process.env.CLIENT_URL,
+    credentials: true,
+  })
+);
 app.use(express.json({ limit: '10mb' }));
 app.use('/uploads', express.static('public/uploads'));
 app.use(passport.initialize());
