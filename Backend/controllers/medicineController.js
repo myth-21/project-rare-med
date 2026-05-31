@@ -1,6 +1,7 @@
 import Medicine from '../models/Medicine.js';
 import Alert from '../models/Alert.js';
 import { sendMedicineAvailabilityAlert } from '../services/emailService.js';
+import { distanceKm } from '../utils/geo.js';
 
 export const listMedicines = async (req, res, next) => {
   try {
@@ -51,11 +52,33 @@ export const suggestMedicines = async (req, res, next) => {
 
 export const getMedicine = async (req, res, next) => {
   try {
-    const medicine = await Medicine.findById(req.params.id).populate(
+    const medicineDoc = await Medicine.findById(req.params.id).populate(
       'pharmacies',
       'name address city state rating openHours location phone email availableMedicines isVerified image logo'
     );
-    if (!medicine) return res.status(404).json({ message: 'Medicine not found' });
+    if (!medicineDoc) return res.status(404).json({ message: 'Medicine not found' });
+
+    const medicine = medicineDoc.toObject({ virtuals: true });
+    const userLat = parseFloat(req.query.lat);
+    const userLng = parseFloat(req.query.lng);
+    const hasCoords = !Number.isNaN(userLat) && !Number.isNaN(userLng);
+
+    medicine.pharmacies = (medicine.pharmacies || [])
+      .map((pharmacy) => {
+        const plat = pharmacy.location?.latitude;
+        const plng = pharmacy.location?.longitude;
+        if (!hasCoords || typeof plat !== 'number' || typeof plng !== 'number') return pharmacy;
+        return {
+          ...pharmacy,
+          distanceKm: Math.round(distanceKm(userLat, userLng, plat, plng) * 10) / 10,
+        };
+      })
+      .sort((a, b) => {
+        if (a.distanceKm == null) return 1;
+        if (b.distanceKm == null) return -1;
+        return a.distanceKm - b.distanceKm;
+      });
+
     const related = await Medicine.find({ category: medicine.category, _id: { $ne: medicine._id } }).limit(8);
     res.json({ medicine, related });
   } catch (error) {
