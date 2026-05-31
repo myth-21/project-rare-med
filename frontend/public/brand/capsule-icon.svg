@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Rare Med capsule">
+  <rect width="48" height="48" rx="14" fill="#F8FAFC"/>
+  <rect x="6" y="14" width="36" height="20" rx="10" fill="#16A34A"/>
+  <rect x="24" y="14" width="18" height="20" rx="10" fill="#15803D"/>
+  <rect x="10" y="20" width="10" height="8" rx="4" fill="#FFFFFF" opacity="0.35"/>
+</svg>

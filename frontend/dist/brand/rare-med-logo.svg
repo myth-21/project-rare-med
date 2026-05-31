@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 220 48" role="img" aria-label="Rare Med">
+  <rect x="0" y="8" width="32" height="32" rx="10" fill="#16A34A"/>
+  <rect x="16" y="8" width="16" height="32" rx="8" fill="#15803D"/>
+  <rect x="4" y="16" width="8" height="16" rx="4" fill="#FFFFFF" opacity="0.3"/>
+  <text x="44" y="32" font-family="Inter,Segoe UI,sans-serif" font-size="22" font-weight="700" fill="#111827">Rare Med</text>
+</svg>
