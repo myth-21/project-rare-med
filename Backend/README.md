@@ -38,8 +38,6 @@ The backend provides secure API endpoints and integrates with MongoDB for data s
 
 ### Notifications
 
-* Welcome Email
-* Password Reset Email
 * Availability Notifications
 
 ---
@@ -53,7 +51,6 @@ The backend provides secure API endpoints and integrates with MongoDB for data s
 * JWT
 * bcryptjs
 * Passport Google OAuth
-* Nodemailer
 * Multer
 * Express Validator
 
@@ -92,7 +89,6 @@ npm start
 ```bash
 npm install express mongoose dotenv cors bcryptjs jsonwebtoken
 npm install passport passport-google-oauth20
-npm install nodemailer
 npm install multer
 npm install express-validator
 npm install
@@ -125,10 +121,6 @@ ADMIN_PASSWORD=Admin@123
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
 
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-SMTP_USER=your_email
-SMTP_PASS=your_app_password
 ```
 
 ---

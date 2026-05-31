@@ -51,9 +51,11 @@ const upload = multer({
 
 const router = express.Router();
 
+const clientUrl = () => (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
+
 const ensureGoogleConfigured = (req, res, next) => {
   if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
-    return res.redirect(`${process.env.CLIENT_URL || 'http://localhost:5173'}/login?googleError=not_configured`);
+    return res.redirect(`${clientUrl()}/login?googleError=not_configured`);
   }
   next();
 };
@@ -66,7 +68,7 @@ router.post('/change-password', requireAuth, changePassword);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
 router.get('/google', ensureGoogleConfigured, passport.authenticate('google', { scope: ['profile', 'email'], session: false }));
-router.get('/google/callback', passport.authenticate('google', { session: false, failureRedirect: `${process.env.CLIENT_URL || 'http://localhost:5173'}/login` }), googleCallback);
+router.get('/google/callback', passport.authenticate('google', { session: false, failureRedirect: `${clientUrl()}/login` }), googleCallback);
 
 // Saved Medicines Routes
 router.post('/saved-medicines/:id', requireAuth, saveMedicine);

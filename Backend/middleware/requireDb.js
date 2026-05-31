@@ -1,12 +1,18 @@
-import { isDbConnected } from '../config/db.js';
+import { isDbConnected, reconnectDB } from '../config/db.js';
 
-export const requireDb = (req, res, next) => {
-  if (!isDbConnected()) {
-    return res.status(503).json({
-      message: 'Database is not connected. Check MongoDB and restart the backend.',
-    });
+export const requireDb = async (req, res, next) => {
+  if (isDbConnected()) {
+    return next();
   }
-  next();
+
+  const result = await reconnectDB();
+  if (result.connected) {
+    return next();
+  }
+
+  return res.status(503).json({
+    message: 'Database is not connected. Check MongoDB Atlas access and MONGO_URI, then redeploy or restart the backend.',
+  });
 };
 
 export default requireDb;

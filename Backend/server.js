@@ -23,9 +23,26 @@ import { ensureSeedData } from './utils/ensureSeed.js';
 
 const app = express();
 
+const normalizeOrigin = (origin = '') => origin.replace(/\/$/, '');
+const allowedOrigins = [
+  process.env.CLIENT_URL,
+  process.env.FRONTEND_URL,
+  process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null,
+  'http://localhost:5173',
+  'http://127.0.0.1:5173',
+]
+  .filter(Boolean)
+  .map(normalizeOrigin);
+
 app.use(
   cors({
-    origin: process.env.CLIENT_URL,
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.length === 0 || allowedOrigins.includes(normalizeOrigin(origin))) {
+        return callback(null, true);
+      }
+      return callback(new Error(`CORS blocked origin: ${origin}`));
+    },
     credentials: true,
   })
 );
@@ -56,20 +73,24 @@ const isDirectRun =
   process.argv[1] &&
   fileURLToPath(import.meta.url) === process.argv[1];
 
+const initializeDatabase = async () => {
+  const dbResult = await connectDB();
+
+  if (dbResult.connected) {
+    await ensureSeedData();
+    console.log('MongoDB connected');
+  } else {
+    console.warn('MongoDB connection failed - API is running with database-backed routes unavailable');
+  }
+};
+
 const startServer = async () => {
   try {
     validateEnv();
 
-    const dbResult = await connectDB();
-
-    if (dbResult.connected) {
-      await ensureSeedData();
-      console.log('MongoDB connected');
-    } else {
-      console.log('MongoDB connection failed');
-    }
-
-    const server = app.listen(PORT);
+    const server = app.listen(PORT, () => {
+      console.log(`Rare Med API listening on port ${PORT}`);
+    });
 
     server.on('error', (error) => {
       if (error.code === 'EADDRINUSE') {
@@ -82,6 +103,10 @@ const startServer = async () => {
 
     mongoose.connection.on('disconnected', () => {
       console.warn('MongoDB disconnected');
+    });
+
+    initializeDatabase().catch((error) => {
+      console.error(`MongoDB initialization failed: ${error.message}`);
     });
   } catch (error) {
     console.error(error.message);

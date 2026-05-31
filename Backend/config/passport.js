@@ -4,13 +4,19 @@ import User from '../models/User.js';
 import generateToken from '../utils/generateToken.js';
 import { sendWelcomeEmailSafe } from '../services/emailService.js';
 
+const apiPublicUrl = () =>
+  (process.env.API_PUBLIC_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
+
+const googleCallbackUrl = () =>
+  process.env.GOOGLE_CALLBACK_URL || `${apiPublicUrl()}/api/auth/google/callback`;
+
 if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
   passport.use(
     new GoogleStrategy(
       {
         clientID: process.env.GOOGLE_CLIENT_ID,
         clientSecret: process.env.GOOGLE_CLIENT_SECRET,
-        callbackURL: process.env.GOOGLE_CALLBACK_URL || '/api/auth/google/callback',
+        callbackURL: googleCallbackUrl(),
       },
       async (accessToken, refreshToken, profile, done) => {
         try {

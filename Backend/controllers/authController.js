@@ -215,7 +215,7 @@ export const resetPassword = async (req, res, next) => {
 };
 
 export const googleCallback = (req, res) => {
-  const redirectUrl = process.env.CLIENT_URL || 'http://localhost:5173';
+  const redirectUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
   res.redirect(`${redirectUrl}/google-success?token=${req.user.token}`);
 };
 
