@@ -53,7 +53,7 @@ export const updateReport = async (req, res, next) => {
     const update = { ...req.body };
     if (['approved', 'verified', 'resolved', 'rejected'].includes(update.status)) {
       update.reviewedAt = new Date();
-      update.reviewedBy = req.user._id;
+      if (req.user?._id !== 'env-admin') update.reviewedBy = req.user._id;
     }
     const report = await Report.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
     if (!report) return res.status(404).json({ message: 'Report not found' });

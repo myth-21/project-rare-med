@@ -4,7 +4,7 @@ import Pharmacy from '../models/Pharmacy.js';
 import Report from '../models/Report.js';
 import Alert from '../models/Alert.js';
 
-export const SEED_VERSION = 3;
+export const SEED_VERSION = 5;
 
 const FALLBACK_MEDICINE = '/medicines/fallback.svg';
 const FALLBACK_PHARMACY = '/pharmacies/fallback.svg';
@@ -25,7 +25,7 @@ const medicines = [
     category: 'Analgesic',
     manufacturer: 'Micro Labs',
     availability: 'available',
-    image: 'https://images.unsplash.com/photo-1584308664944-24d5c474f2ae?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1585435557343-3b5930311d45?auto=format&fit=crop&w=600&q=80',
     description: 'Higher-strength paracetamol tablets for fever and body pain.',
   },
   {
@@ -97,7 +97,7 @@ const medicines = [
     category: 'Gastroenterology',
     manufacturer: 'Sun Pharma',
     availability: 'available',
-    image: 'https://images.unsplash.com/photo-1585435557343-3b5930311d45?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1628771065518-0d82f15e81a8?auto=format&fit=crop&w=600&q=80',
     description: 'Proton pump inhibitor for acidity and GERD.',
   },
   {
@@ -106,7 +106,7 @@ const medicines = [
     category: 'Allergy',
     manufacturer: 'UCB',
     availability: 'available',
-    image: 'https://images.unsplash.com/photo-1587854692152-cf240b12c497?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1607619056574-7b8d304f3c6f?auto=format&fit=crop&w=600&q=80',
     description: 'Antihistamine for allergies and hay fever.',
   },
   {
@@ -115,7 +115,7 @@ const medicines = [
     category: 'Cardiology',
     manufacturer: 'Pfizer',
     availability: 'available',
-    image: 'https://images.unsplash.com/photo-1587854692152-cf240b12c497?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1512438248247-f0f2a5a8b7f0?auto=format&fit=crop&w=600&q=80',
     description: 'Statin medicine to lower cholesterol levels.',
   },
   {
@@ -124,7 +124,7 @@ const medicines = [
     category: 'Cardiology',
     manufacturer: 'Cipla',
     availability: 'available',
-    image: 'https://images.unsplash.com/photo-1584308664944-24d5c474f2ae?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1547853760-18452f56ba8e?auto=format&fit=crop&w=600&q=80',
     description: 'Calcium channel blocker for hypertension.',
   },
   {
@@ -133,7 +133,7 @@ const medicines = [
     category: 'Cardiology',
     manufacturer: 'Torrent',
     availability: 'available',
-    image: 'https://images.unsplash.com/photo-1471864190281-a93a3070b6de?auto=format&fit=crop&w=600&q=80',
+    image: 'https://images.unsplash.com/photo-1555364124-1313a5b2b23b?auto=format&fit=crop&w=600&q=80',
     description: 'ARB medicine for blood pressure management.',
   },
 ];
@@ -205,6 +205,35 @@ const pharmacies = [
     image: 'https://images.unsplash.com/photo-1587854692152-cf240b12c497?auto=format&fit=crop&w=800&q=80',
   },
   {
+    name: 'Apollo Pharmacy',
+    address: 'Indiranagar 100 Feet Road',
+    city: 'Bengaluru',
+    state: 'Karnataka',
+    location: { latitude: 12.9784, longitude: 77.6408 },
+    phone: '080-2521-2244',
+    image: 'https://images.unsplash.com/photo-1576602976047-174e1f8d0b0e?auto=format&fit=crop&w=800&q=80',
+    logo: 'https://images.unsplash.com/photo-1584308664944-24d5c474f2ae?auto=format&fit=crop&w=200&q=80',
+  },
+  {
+    name: 'MedPlus',
+    address: 'Koramangala 5th Block',
+    city: 'Bengaluru',
+    state: 'Karnataka',
+    location: { latitude: 12.9352, longitude: 77.6245 },
+    phone: '080-4110-7788',
+    image: 'https://images.unsplash.com/photo-1631549916768-4119d9580c8a?auto=format&fit=crop&w=800&q=80',
+    logo: 'https://images.unsplash.com/photo-1631549916768-4119d9580c8a?auto=format&fit=crop&w=200&q=80',
+  },
+  {
+    name: 'Medicover Pharmacy',
+    address: 'Whitefield Main Road',
+    city: 'Bengaluru',
+    state: 'Karnataka',
+    location: { latitude: 12.9698, longitude: 77.7500 },
+    phone: '080-2845-8899',
+    image: 'https://images.unsplash.com/photo-1579684385127-1ef15d508118?auto=format&fit=crop&w=800&q=80',
+  },
+  {
     name: 'Netmeds Store',
     address: '45 Anna Salai',
     city: 'Chennai',
@@ -241,7 +270,7 @@ export async function seedDatabase({ clear = false, force = false } = {}) {
 
   const needsUpgrade =
     force ||
-    existingPharms < 8 ||
+    existingPharms < 11 ||
     !samplePharmacy?.logo ||
     (samplePharmacy?.name === '1mg Pharmacy Hub' && existingPharms < 10);
 

@@ -4,6 +4,8 @@ import { v2 as cloudinary } from 'cloudinary';
 import User from '../models/User.js';
 import generateToken from '../utils/generateToken.js';
 import { toPublicUrl } from '../utils/publicUrl.js';
+import { sendWelcomeEmail } from '../services/emailService.js';
+import log from '../utils/logger.js';
 
 // Configure Cloudinary if credentials exist
 if (process.env.CLOUDINARY_CLOUD_NAME && process.env.CLOUDINARY_API_KEY) {
@@ -33,18 +35,31 @@ const publicUser = (user) => ({
 
 const authPayload = (user) => ({ token: generateToken(user), user: publicUser(user) });
 
+const normalizeEmail = (email) => String(email || '').trim().toLowerCase();
+
+const duplicateField = (error) => Object.keys(error.keyPattern || error.keyValue || {})[0] || 'unknown';
+
+const duplicateMessage = (field) => {
+  if (field === 'email') return 'Email already registered';
+  if (field === 'googleId') return 'Google account is already linked to another user';
+  return `Duplicate value for ${field}`;
+};
+
 export const register = async (req, res, next) => {
   try {
     const { name, email, password, confirmPassword, phoneNumber, city, state } = req.body;
-    const normalizedEmail = String(email || '').trim().toLowerCase();
+    const normalizedEmail = normalizeEmail(email);
+    log.info(`[Auth][Register] Registration request received email=${normalizedEmail || '(missing)'}`);
     
     if (!name || !normalizedEmail || !password) {
+      log.warn(`[Auth][Register] Validation failed missingRequired email=${normalizedEmail || '(missing)'}`);
       return res.status(400).json({ message: 'Name, email and password are required' });
     }
 
     // Name Validation: 3–30 characters, Letters and spaces only, No numbers, No special characters
     const nameRegex = /^[a-zA-Z\s]{3,30}$/;
     if (!nameRegex.test(name.trim())) {
+      log.warn(`[Auth][Register] Validation failed invalidName email=${normalizedEmail}`);
       return res.status(400).json({
         message: 'Name must be 3–30 characters and contain letters and spaces only (no numbers or special characters).'
       });
@@ -52,23 +67,44 @@ export const register = async (req, res, next) => {
 
     // Email Validation
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      log.warn(`[Auth][Register] Validation failed invalidEmail email=${normalizedEmail}`);
       return res.status(400).json({ message: 'Enter a valid email address' });
     }
 
     // Password Validation: 8–32 characters, 1 uppercase, 1 lowercase, 1 number, 1 special character
     const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&#^()_+=\[\]{}|\\;:\'",.<>\/?~`-]).{8,32}$/;
     if (!passwordRegex.test(password)) {
+      log.warn(`[Auth][Register] Validation failed weakPassword email=${normalizedEmail}`);
       return res.status(400).json({
         message: 'Password must be 8–32 characters and contain at least one uppercase letter, one lowercase letter, one number, and one special character.'
       });
     }
 
     if (password !== confirmPassword) {
+      log.warn(`[Auth][Register] Validation failed passwordMismatch email=${normalizedEmail}`);
       return res.status(400).json({ message: 'Passwords do not match' });
     }
 
     const existing = await User.findOne({ email: normalizedEmail });
+    log.info(
+      `[Auth][Register] Email lookup result email=${normalizedEmail} db=${User.db.name} collection=${User.collection.name} found=${Boolean(existing)} userId=${existing?._id || 'none'} hasPassword=${Boolean(existing?.password)} googleLinked=${Boolean(existing?.googleId)}`
+    );
     if (existing) {
+      if (existing.googleId && !existing.password) {
+        existing.name = existing.name || name;
+        existing.password = password;
+        existing.phoneNumber = existing.phoneNumber || phoneNumber || '';
+        existing.city = existing.city || city || '';
+        existing.state = existing.state || state || '';
+        existing.isActive = true;
+        await existing.save();
+        log.info(`[Auth][Register] Password credential linked to existing Google user email=${normalizedEmail} userId=${existing._id}`);
+        return res.status(200).json({
+          message: 'Password login enabled for your existing Rare Med account.',
+          ...authPayload(existing),
+        });
+      }
+      log.warn(`[Auth][Register] Duplicate email rejected email=${normalizedEmail} userId=${existing._id}`);
       return res.status(409).json({ message: 'Email already registered' });
     }
 
@@ -81,13 +117,27 @@ export const register = async (req, res, next) => {
       state,
       isActive: true,
     });
+    log.info(`[Auth][Register] User creation result success email=${normalizedEmail} userId=${user._id} db=${User.db.name} collection=${User.collection.name}`);
+
+    try {
+      await sendWelcomeEmail(user.email, user.name);
+      user.welcomeEmailSentAt = new Date();
+      await user.save({ validateBeforeSave: false });
+    } catch (error) {
+      console.error('Email Error:', error.message);
+    }
 
     res.status(201).json({
       message: 'Registration successful. You can now log in to your account.',
       ...authPayload(user),
     });
   } catch (error) {
-    if (error.code === 11000) return res.status(409).json({ message: 'Email already registered' });
+    if (error.code === 11000) {
+      const field = duplicateField(error);
+      log.error(`[Auth][Register] Duplicate key error field=${field} keyValue=${JSON.stringify(error.keyValue || {})}`);
+      return res.status(409).json({ message: duplicateMessage(field) });
+    }
+    log.error(`[Auth][Register] Registration failed message=${error.message}`);
     next(error);
   }
 };
@@ -95,29 +145,32 @@ export const register = async (req, res, next) => {
 export const login = async (req, res, next) => {
   try {
     const { email, password } = req.body;
-    const normalizedEmail = String(email || '').trim().toLowerCase();
-    if (normalizedEmail === String(process.env.ADMIN_EMAIL || '').trim().toLowerCase() && password === process.env.ADMIN_PASSWORD) {
-      const admin = {
-        _id: 'env-admin',
-        id: 'env-admin',
-        name: 'Rare Med Admin',
-        email: normalizedEmail,
-        isAdmin: true,
-        isActive: true,
-        profilePicture: '',
-        phoneNumber: '',
-        city: '',
-        state: '',
-        notificationPreferences: { email: true, inApp: true },
-      };
-      return res.json(authPayload(admin));
+    const normalizedEmail = normalizeEmail(email);
+    log.info(`[Auth][Login] Login request received email=${normalizedEmail || '(missing)'}`);
+
+    if (!normalizedEmail || !password) {
+      log.warn(`[Auth][Login] Validation failed missingCredentials email=${normalizedEmail || '(missing)'}`);
+      return res.status(400).json({ message: 'Email and password are required' });
     }
 
     const user = await User.findOne({ email: normalizedEmail });
-    if (!user || !(await user.matchPassword(password))) return res.status(401).json({ message: 'Invalid credentials' });
+    log.info(
+      `[Auth][Login] Login lookup result email=${normalizedEmail} db=${User.db.name} collection=${User.collection.name} found=${Boolean(user)} userId=${user?._id || 'none'} hasPassword=${Boolean(user?.password)} googleLinked=${Boolean(user?.googleId)}`
+    );
+    if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+
+    const passwordMatches = await user.matchPassword(password);
+    log.info(`[Auth][Login] Password comparison result email=${normalizedEmail} userId=${user._id} matches=${passwordMatches}`);
+    if (!passwordMatches) {
+      const message = user.googleId && !user.password ? 'Use Google sign-in or register a password for this account' : 'Invalid credentials';
+      return res.status(401).json({ message });
+    }
+
     if (!user.isActive) return res.status(403).json({ message: 'Account is disabled' });
+    log.info(`[Auth][Login] Login success email=${normalizedEmail} userId=${user._id}`);
     res.json(authPayload(user));
   } catch (error) {
+    log.error(`[Auth][Login] Login failed message=${error.message}`);
     next(error);
   }
 };
@@ -216,7 +269,9 @@ export const resetPassword = async (req, res, next) => {
 
 export const googleCallback = (req, res) => {
   const redirectUrl = (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
-  res.redirect(`${redirectUrl}/google-success?token=${req.user.token}`);
+  const token = encodeURIComponent(req.user.token);
+  const mode = req.user.isNewUser ? 'signup' : 'signin';
+  res.redirect(`${redirectUrl}/google-success?token=${token}&mode=${mode}`);
 };
 
 export const saveMedicine = async (req, res, next) => {

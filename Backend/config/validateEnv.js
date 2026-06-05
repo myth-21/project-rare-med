@@ -14,8 +14,29 @@ export const validateEnv = () => {
 
 
 
+  const smtpKeys = ['SMTP_HOST', 'SMTP_PORT', 'SMTP_USER', 'SMTP_PASS'];
+  const missingSmtpKeys = smtpKeys.filter((key) => !process.env[key]);
+  if (missingSmtpKeys.length > 0) {
+    warnings.push(`SMTP email is not fully configured - missing ${missingSmtpKeys.join(', ')}`);
+  }
+
   if (process.env.GOOGLE_CALLBACK_URL?.includes('/api/v1/')) {
     warnings.push('GOOGLE_CALLBACK_URL should be http://localhost:5000/api/auth/google/callback (not /api/v1/)');
+  }
+
+  if (process.env.GOOGLE_CLIENT_ID && !process.env.GOOGLE_CLIENT_SECRET) {
+    warnings.push('GOOGLE_CLIENT_SECRET is missing - Google sign-in will be disabled');
+  }
+
+  if (!process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    warnings.push('GOOGLE_CLIENT_ID is missing - Google sign-in will be disabled');
+  }
+
+  if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
+    const callbackUrl =
+      process.env.GOOGLE_CALLBACK_URL ||
+      `${process.env.API_PUBLIC_URL || `http://localhost:${process.env.PORT || 5000}`}/api/auth/google/callback`;
+    warnings.push(`Google OAuth callback must be configured in Google Cloud as: ${callbackUrl}`);
   }
 
   warnings.forEach((w) => log.warn(`[Env] ${w}`));
@@ -25,4 +46,3 @@ export const validateEnv = () => {
 };
 
 export default validateEnv;
-

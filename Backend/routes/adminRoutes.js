@@ -1,13 +1,17 @@
 import express from 'express';
-import { analytics, adminStats, deleteUser, listUsers, updateUser } from '../controllers/adminController.js';
-import { requireAdmin, requireAuth } from '../middleware/authMiddleware.js';
+import { analytics, adminDashboard, adminLogin, adminStats, deleteUser, listUsers, updateUser } from '../controllers/adminController.js';
+import adminAuthMiddleware from '../middleware/adminAuthMiddleware.js';
 import { createMedicine, deleteMedicine, listMedicines, updateMedicine } from '../controllers/medicineController.js';
-import { deletePharmacy, listPharmacies, updatePharmacy } from '../controllers/pharmacyController.js';
+import { createPharmacy, deletePharmacy, listPharmacies, updatePharmacy } from '../controllers/pharmacyController.js';
 import { deleteReport, listReports, updateReport } from '../controllers/reportController.js';
 
 const router = express.Router();
-router.use(requireAuth, requireAdmin);
 
+router.post('/login', adminLogin);
+
+router.use(adminAuthMiddleware);
+
+router.get('/dashboard', adminDashboard);
 router.get('/stats', adminStats);
 router.get('/analytics', analytics);
 router.get('/users', listUsers);
@@ -18,6 +22,7 @@ router.post('/medicines', createMedicine);
 router.put('/medicines/:id', updateMedicine);
 router.delete('/medicines/:id', deleteMedicine);
 router.get('/pharmacies', listPharmacies);
+router.post('/pharmacies', createPharmacy);
 router.put('/pharmacies/:id', updatePharmacy);
 router.delete('/pharmacies/:id', deletePharmacy);
 router.get('/reports', listReports);

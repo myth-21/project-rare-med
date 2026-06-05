@@ -13,6 +13,7 @@ import pharmacyRoutes from './routes/pharmacyRoutes.js';
 import reportRoutes from './routes/reportRoutes.js';
 import alertRoutes from './routes/alertRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import { testWelcomeEmail } from './controllers/testEmailController.js';
 
 import errorHandler, { notFound } from './middleware/errorMiddleware.js';
 
@@ -63,6 +64,7 @@ app.use('/api/pharmacies', pharmacyRoutes);
 app.use('/api/reports', reportRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/admin', adminRoutes);
+app.get('/api/test-email', testWelcomeEmail);
 
 app.use(notFound);
 app.use(errorHandler);
@@ -71,7 +73,8 @@ const PORT = process.env.PORT || 5000;
 
 const isDirectRun =
   process.argv[1] &&
-  fileURLToPath(import.meta.url) === process.argv[1];
+  fileURLToPath(import.meta.url).replaceAll('\\', '/').toLowerCase() ===
+    process.argv[1].replaceAll('\\', '/').toLowerCase();
 
 const initializeDatabase = async () => {
   const dbResult = await connectDB();
@@ -114,8 +117,6 @@ const startServer = async () => {
   }
 };
 
-if (isDirectRun) {
-  startServer();
-}
+startServer();
 
 export default app;

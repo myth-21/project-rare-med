@@ -17,7 +17,7 @@ const tryConnect = async (uri) => {
     socketTimeoutMS: 45000,
   });
   connectedUri = uri;
-  // log.info(`MongoDB connected: ${uri.replace(/\/\/([^:]+):([^@]+)@/, '//$1:***@')}`);
+  log.info(`[DB] MongoDB connected db=${mongoose.connection.name} uri=${maskMongoUri(uri)}`);
   return true;
 };
 

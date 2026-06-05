@@ -19,6 +19,7 @@ import {
   addSearchHistory,
 } from '../controllers/authController.js';
 import { requireAuth } from '../middleware/authMiddleware.js';
+import log from '../utils/logger.js';
 
 // Ensure public/uploads directory exists for avatar uploads
 const uploadDir = 'public/uploads';
@@ -53,8 +54,38 @@ const router = express.Router();
 
 const clientUrl = () => (process.env.CLIENT_URL || 'http://localhost:5173').replace(/\/$/, '');
 
+const apiPublicUrl = () =>
+  (process.env.API_PUBLIC_URL || `http://localhost:${process.env.PORT || 5000}`).replace(/\/$/, '');
+
+const googleCallbackUrl = () =>
+  process.env.GOOGLE_CALLBACK_URL || `${apiPublicUrl()}/api/auth/google/callback`;
+
+const googleFailureCode = (error) => {
+  const raw = [
+    error?.message,
+    error?.oauthError?.data?.toString?.(),
+    error?.oauthError?.statusCode,
+    error,
+  ]
+    .filter(Boolean)
+    .join(' ')
+    .toLowerCase();
+
+  if (raw.includes('redirect_uri_mismatch')) return 'redirect_uri_mismatch';
+  if (raw.includes('invalid_client')) return 'oauth_configuration';
+  if (raw.includes('access_denied')) return 'access_denied';
+  if (raw.includes('missing_google_code')) return 'missing_google_code';
+  return 'google_auth_failed';
+};
+
+const redirectGoogleFailure = (res, reason) => {
+  const safeReason = encodeURIComponent(typeof reason === 'string' ? reason : googleFailureCode(reason));
+  return res.redirect(`${clientUrl()}/login?googleError=${safeReason}`);
+};
+
 const ensureGoogleConfigured = (req, res, next) => {
   if (!process.env.GOOGLE_CLIENT_ID || !process.env.GOOGLE_CLIENT_SECRET) {
+    log.error('[Auth][Google] Google OAuth is not configured');
     return res.redirect(`${clientUrl()}/login?googleError=not_configured`);
   }
   next();
@@ -67,8 +98,47 @@ router.put('/profile', requireAuth, updateProfile);
 router.post('/change-password', requireAuth, changePassword);
 router.post('/forgot-password', forgotPassword);
 router.post('/reset-password', resetPassword);
-router.get('/google', ensureGoogleConfigured, passport.authenticate('google', { scope: ['profile', 'email'], session: false }));
-router.get('/google/callback', passport.authenticate('google', { session: false, failureRedirect: `${clientUrl()}/login` }), googleCallback);
+router.get('/google', ensureGoogleConfigured, (req, res, next) => {
+  log.info(`[Auth][Google] Sign-in request received callbackUrl=${googleCallbackUrl()}`);
+  passport.authenticate('google', {
+    scope: ['profile', 'email'],
+    session: false,
+    prompt: 'select_account',
+  })(req, res, next);
+});
+
+router.get('/google/callback', ensureGoogleConfigured, (req, res, next) => {
+  log.info(
+    `[Auth][Google] Callback received hasCode=${Boolean(req.query.code)} error=${req.query.error || 'none'} callbackUrl=${googleCallbackUrl()}`
+  );
+
+  if (req.query.error) {
+    log.error(`[Auth][Google] Provider returned error=${req.query.error} description=${req.query.error_description || 'none'}`);
+    return redirectGoogleFailure(res, req.query.error);
+  }
+
+  if (!req.query.code) {
+    log.error('[Auth][Google] Callback missing authorization code');
+    return redirectGoogleFailure(res, 'missing_google_code');
+  }
+
+  passport.authenticate('google', { session: false }, (error, user, info) => {
+    if (error) {
+      log.error(`[Auth][Google] Passport callback error message=${error.message}`);
+      return redirectGoogleFailure(res, error);
+    }
+
+    if (!user) {
+      const reason = info?.message || 'google_auth_failed';
+      log.error(`[Auth][Google] Passport callback failed reason=${reason}`);
+      return redirectGoogleFailure(res, reason);
+    }
+
+    log.info(`[Auth][Google] Passport callback success email=${user.email} userId=${user._id || user.id}`);
+    req.user = user;
+    return googleCallback(req, res, next);
+  })(req, res, next);
+});
 
 // Saved Medicines Routes
 router.post('/saved-medicines/:id', requireAuth, saveMedicine);

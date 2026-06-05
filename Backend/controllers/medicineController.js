@@ -2,10 +2,44 @@ import Medicine from '../models/Medicine.js';
 import Alert from '../models/Alert.js';
 import { sendMedicineAvailabilityAlert } from '../services/emailService.js';
 import { distanceKm } from '../utils/geo.js';
+import { formatPharmacy } from '../utils/formatPharmacy.js';
+
+const parseCoordinates = (query) => {
+  const lat = Number.parseFloat(query.lat);
+  const lng = Number.parseFloat(query.lng);
+  const valid =
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180;
+  return { lat, lng, valid };
+};
+
+const withDistance = (pharmacy, lat, lng) => {
+  const doc = pharmacy.toObject ? pharmacy.toObject({ virtuals: true }) : { ...pharmacy };
+  const plat = doc.location?.latitude ?? doc.latitude;
+  const plng = doc.location?.longitude ?? doc.longitude;
+  const extra = {};
+  if (typeof plat === 'number' && typeof plng === 'number') {
+    extra.distanceKm = Math.round(distanceKm(lat, lng, plat, plng) * 10) / 10;
+    extra.coordinates = { lat: plat, lng: plng };
+  }
+  return formatPharmacy(doc, extra);
+};
+
+const sortNearest = (pharmacies) =>
+  pharmacies.sort((a, b) => {
+    if (a.distanceKm == null) return 1;
+    if (b.distanceKm == null) return -1;
+    return a.distanceKm - b.distanceKm;
+  });
 
 export const listMedicines = async (req, res, next) => {
   try {
     const { search = '', category, availability, sort = 'name' } = req.query;
+    const { lat, lng, valid: hasCoords } = parseCoordinates(req.query);
     const query = {};
     if (search) query.$or = [{ name: new RegExp(search, 'i') }, { genericName: new RegExp(search, 'i') }, { manufacturer: new RegExp(search, 'i') }];
     if (category) query.category = category;
@@ -15,9 +49,18 @@ export const listMedicines = async (req, res, next) => {
     const sortKey = allowed.has(field)
       ? { [field]: String(sort).startsWith('-') ? -1 : 1 }
       : { name: 1 };
-    const medicines = await Medicine.find(query)
+    const medicineDocs = await Medicine.find(query)
       .populate('pharmacies', 'name address city state phone email rating location openHours isVerified image logo')
       .sort(sortKey);
+    const medicines = medicineDocs.map((medicineDoc) => {
+      const medicine = medicineDoc.toObject({ virtuals: true });
+      medicine.pharmacies = (medicine.pharmacies || []).map((pharmacy) => {
+        if (!hasCoords) return formatPharmacy(pharmacy);
+        return withDistance(pharmacy, lat, lng);
+      });
+      if (hasCoords) medicine.pharmacies = sortNearest(medicine.pharmacies);
+      return medicine;
+    });
     res.json({ medicines });
   } catch (error) {
     next(error);
@@ -59,25 +102,11 @@ export const getMedicine = async (req, res, next) => {
     if (!medicineDoc) return res.status(404).json({ message: 'Medicine not found' });
 
     const medicine = medicineDoc.toObject({ virtuals: true });
-    const userLat = parseFloat(req.query.lat);
-    const userLng = parseFloat(req.query.lng);
-    const hasCoords = !Number.isNaN(userLat) && !Number.isNaN(userLng);
+    const { lat: userLat, lng: userLng, valid: hasCoords } = parseCoordinates(req.query);
 
     medicine.pharmacies = (medicine.pharmacies || [])
-      .map((pharmacy) => {
-        const plat = pharmacy.location?.latitude;
-        const plng = pharmacy.location?.longitude;
-        if (!hasCoords || typeof plat !== 'number' || typeof plng !== 'number') return pharmacy;
-        return {
-          ...pharmacy,
-          distanceKm: Math.round(distanceKm(userLat, userLng, plat, plng) * 10) / 10,
-        };
-      })
-      .sort((a, b) => {
-        if (a.distanceKm == null) return 1;
-        if (b.distanceKm == null) return -1;
-        return a.distanceKm - b.distanceKm;
-      });
+      .map((pharmacy) => (hasCoords ? withDistance(pharmacy, userLat, userLng) : formatPharmacy(pharmacy)));
+    if (hasCoords) medicine.pharmacies = sortNearest(medicine.pharmacies);
 
     const related = await Medicine.find({ category: medicine.category, _id: { $ne: medicine._id } }).limit(8);
     res.json({ medicine, related });

@@ -1,6 +1,38 @@
 import Pharmacy from '../models/Pharmacy.js';
 import { formatPharmacy, formatPharmacyList } from '../utils/formatPharmacy.js';
 import { distanceKm } from '../utils/geo.js';
+import mongoose from 'mongoose';
+import log from '../utils/logger.js';
+
+const parseCoordinates = (query) => {
+  const lat = Number.parseFloat(query.lat);
+  const lng = Number.parseFloat(query.lng);
+  const valid =
+    Number.isFinite(lat) &&
+    Number.isFinite(lng) &&
+    lat >= -90 &&
+    lat <= 90 &&
+    lng >= -180 &&
+    lng <= 180;
+  return { lat, lng, valid };
+};
+
+const pharmacyDistanceExtra = (lat, lng) => (pharmacy) => {
+  const plat = pharmacy.latitude ?? pharmacy.location?.latitude;
+  const plng = pharmacy.longitude ?? pharmacy.location?.longitude;
+  if (typeof plat !== 'number' || typeof plng !== 'number') return { distanceKm: null };
+  return {
+    distanceKm: Math.round(distanceKm(lat, lng, plat, plng) * 10) / 10,
+    coordinates: { lat: plat, lng: plng },
+  };
+};
+
+const sortNearest = (pharmacies) =>
+  pharmacies.sort((a, b) => {
+    if (a.distanceKm == null) return 1;
+    if (b.distanceKm == null) return -1;
+    return a.distanceKm - b.distanceKm;
+  });
 
 export const listPharmacies = async (req, res, next) => {
   try {
@@ -14,24 +46,15 @@ export const listPharmacies = async (req, res, next) => {
       .populate('availableMedicines', 'name genericName availability category manufacturer image')
       .lean();
 
-    const userLat = parseFloat(lat);
-    const userLng = parseFloat(lng);
-    const hasCoords = !Number.isNaN(userLat) && !Number.isNaN(userLng);
+    const { lat: userLat, lng: userLng, valid: hasCoords } = parseCoordinates({ lat, lng });
 
     let pharmacies = formatPharmacyList(rows, (p) => {
       if (!hasCoords) return {};
-      const plat = p.latitude ?? p.location?.latitude;
-      const plng = p.longitude ?? p.location?.longitude;
-      if (typeof plat !== 'number' || typeof plng !== 'number') return { distanceKm: null };
-      return { distanceKm: Math.round(distanceKm(userLat, userLng, plat, plng) * 10) / 10 };
+      return pharmacyDistanceExtra(userLat, userLng)(p);
     });
 
     if (hasCoords && (sort === 'distance' || !sort)) {
-      pharmacies = pharmacies.sort((a, b) => {
-        if (a.distanceKm == null) return 1;
-        if (b.distanceKm == null) return -1;
-        return a.distanceKm - b.distanceKm;
-      });
+      pharmacies = sortNearest(pharmacies);
     } else {
       pharmacies = pharmacies.sort((a, b) => `${a.city}${a.name}`.localeCompare(`${b.city}${b.name}`));
     }
@@ -41,6 +64,31 @@ export const listPharmacies = async (req, res, next) => {
       userLocation: hasCoords ? { latitude: userLat, longitude: userLng } : null,
     });
   } catch (error) {
+    next(error);
+  }
+};
+
+export const nearbyPharmacies = async (req, res, next) => {
+  try {
+    const { lat, lng, valid } = parseCoordinates(req.query);
+    if (!valid) {
+      log.warn(`[Pharmacy][Nearby] Invalid coordinates lat=${req.query.lat || '(missing)'} lng=${req.query.lng || '(missing)'}`);
+      return res.status(400).json({ message: 'Valid latitude and longitude are required' });
+    }
+
+    const rows = await Pharmacy.find({})
+      .populate('availableMedicines', 'name genericName availability category manufacturer image')
+      .lean();
+
+    const pharmacies = sortNearest(formatPharmacyList(rows, pharmacyDistanceExtra(lat, lng)));
+    log.info(`[Pharmacy][Nearby] Returned ${pharmacies.length} pharmacies for lat=${lat} lng=${lng}`);
+
+    res.json({
+      pharmacies,
+      userLocation: { latitude: lat, longitude: lng },
+    });
+  } catch (error) {
+    log.error(`[Pharmacy][Nearby] Failed message=${error.message}`);
     next(error);
   }
 };
@@ -73,7 +121,8 @@ export const getPharmacy = async (req, res, next) => {
 
 export const createPharmacy = async (req, res, next) => {
   try {
-    const pharmacy = await Pharmacy.create({ ...req.body, ownerUser: req.user?._id });
+    const ownerUser = mongoose.Types.ObjectId.isValid(req.user?._id) ? req.user._id : undefined;
+    const pharmacy = await Pharmacy.create({ ...req.body, ownerUser });
     res.status(201).json({ pharmacy: formatPharmacy(pharmacy) });
   } catch (error) {
     next(error);

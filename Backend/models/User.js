@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import bcrypt from 'bcryptjs';
+import log from '../utils/logger.js';
 
 const userSchema = new mongoose.Schema(
   {
@@ -38,14 +39,24 @@ const userSchema = new mongoose.Schema(
 
 userSchema.index({ googleId: 1 }, { unique: true, sparse: true });
 
+userSchema.pre('validate', function normalizeAuthProviderFields(next) {
+  if (this.googleId == null) this.googleId = undefined;
+  next();
+});
+
 userSchema.pre('save', async function hashPassword(next) {
   if (!this.isModified('password') || !this.password) return next();
+  log.info(`[Auth][Model] Password hash generation started userId=${this._id || 'new'} email=${this.email}`);
   this.password = await bcrypt.hash(this.password, 10);
+  log.info(`[Auth][Model] Password hash generation completed userId=${this._id || 'new'} email=${this.email}`);
   next();
 });
 
 userSchema.methods.matchPassword = function matchPassword(password) {
-  if (!this.password) return false;
+  if (!this.password) {
+    log.info(`[Auth][Model] Password comparison skipped noPasswordHash userId=${this._id} email=${this.email}`);
+    return false;
+  }
   return bcrypt.compare(password, this.password);
 };
 

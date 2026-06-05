@@ -17,11 +17,13 @@ export async function ensureSeedData() {
     ]);
 
     const sample = await Pharmacy.findOne().select('logo city').lean();
+    const samplePara650 = await Medicine.findOne({ name: 'Paracetamol 650mg' }).lean();
     const needsSeed =
       medicineCount === 0 ||
       pharmacyCount === 0 ||
       !sample?.logo ||
-      pharmacyCount < 8;
+      pharmacyCount < 11 ||
+      (samplePara650 && samplePara650.image === 'https://images.unsplash.com/photo-1584308664944-24d5c474f2ae?auto=format&fit=crop&w=600&q=80');
 
     if (!needsSeed) {
       // log.info(`[DB] v${SEED_VERSION}: ${medicineCount} medicines, ${pharmacyCount} pharmacies`);
