@@ -1,9 +1,30 @@
 import api from './api';
-export const login = (payload) => api.post('/auth/login', payload);
-export const register = (payload) => api.post('/auth/register', payload);
-export const forgotPassword = (payload) => api.post('/auth/forgot-password', payload);
-export const getProfile = () => api.get('/auth/profile');
-export const logout = () => {
-  localStorage.removeItem('raremed_token');
-  localStorage.removeItem('raremed_user');
+
+const login = async (credentials) => {
+  const response = await api.post('/auth/login', credentials);
+  return response.data;
 };
+
+const register = async (userData) => {
+  const response = await api.post('/auth/register', userData);
+  return response.data;
+};
+
+const getProfile = async () => {
+  const response = await api.get('/auth/profile');
+  return response.data;
+};
+
+const updateProfile = async (profileData) => {
+  const response = await api.put('/auth/profile', profileData);
+  return response.data;
+};
+
+const authService = {
+  login,
+  register,
+  getProfile,
+  updateProfile,
+};
+
+export default authService;

@@ -1,5 +1,6 @@
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
+import log from '../utils/logger.js';
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -53,7 +54,15 @@ export const registerUser = async ({ name, email, password, confirmPassword }) =
   }
 
   const existingUser = await User.findOne({ email: normalizedEmail });
+  log.info(`[Auth][Register] email=${normalizedEmail} existingUser=${Boolean(existingUser)} userId=${existingUser?._id} googleId=${existingUser?.googleId || 'none'} passwordExists=${Boolean(existingUser?.password)} db=${User.db.name} collection=${User.collection.name} uri=${process.env.MONGO_URI || 'unknown'}`);
+
   if (existingUser) {
+    if (existingUser.googleId && !existingUser.password) {
+      const error = new Error('This account was created using Google Sign-In. Please use Google Login.');
+      error.statusCode = 400;
+      throw error;
+    }
+
     const error = new Error('This email is already registered.');
     error.statusCode = 400;
     throw error;
@@ -81,7 +90,29 @@ export const loginUser = async ({ email, password }) => {
   }
 
   const user = await User.findOne({ email: normalizedEmail });
-  if (!user || !(await user.matchPassword(password))) {
+  log.info(`[Auth][Login] email=${normalizedEmail} found=${Boolean(user)} userId=${user?._id} googleId=${user?.googleId || 'none'} passwordExists=${Boolean(user?.password)} db=${User.db.name} collection=${User.collection.name} uri=${process.env.MONGO_URI || 'unknown'}`);
+
+  if (!user) {
+    const error = new Error('Invalid email or password');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  if (!user.password) {
+    if (user.googleId) {
+      const error = new Error('This account was created using Google Sign-In. Please use Google Login.');
+      error.statusCode = 401;
+      throw error;
+    }
+    const error = new Error('Invalid email or password');
+    error.statusCode = 401;
+    throw error;
+  }
+
+  const passwordMatch = await user.matchPassword(password);
+  log.info(`[Auth][Login] passwordHashExists=${Boolean(user.password)} passwordMatchResult=${passwordMatch} userId=${user._id} email=${normalizedEmail}`);
+
+  if (!passwordMatch) {
     const error = new Error('Invalid email or password');
     error.statusCode = 401;
     throw error;

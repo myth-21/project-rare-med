@@ -1,61 +1,71 @@
 import { create } from 'zustand';
-import api from '../services/api';
+import { persist } from 'zustand/middleware';
+import authService from '../services/authService';
 
-const readSavedUser = () => {
-  try {
-    const savedUser = localStorage.getItem('raremed_user');
-    return savedUser ? JSON.parse(savedUser) : null;
-  } catch {
-    localStorage.removeItem('raremed_user');
-    return null;
-  }
-};
+const useAuthStore = create(
+  persist(
+    (set, get) => ({
+      token: null,
+      user: null,
+      setSession: ({ token, user }) => {
+        if (token) {
+          localStorage.setItem('raremed_token', token);
+        } else {
+          localStorage.removeItem('raremed_token');
+        }
+        set({ token, user });
+      },
+      login: async ({ email, password }) => {
+        const data = await authService.login({ email, password });
 
-const useAuthStore = create((set, get) => ({
-  user: readSavedUser(),
-  token: localStorage.getItem('raremed_token'),
-  loading: false,
-  setSession: ({ token, user }) => {
-    if (token) localStorage.setItem('raremed_token', token);
-    if (user !== undefined) localStorage.setItem('raremed_user', JSON.stringify(user));
-    set({ token, user });
-  },
-  login: async (payload) => {
-    set({ loading: true });
-    try {
-      const { data } = await api.post('/auth/login', payload);
-      get().setSession(data);
-      return data;
-    } finally {
-      set({ loading: false });
-    }
-  },
-  register: async (payload) => {
-    set({ loading: true });
-    try {
-      const { data } = await api.post('/auth/register', payload);
-      get().setSession({ token: data.token, user: data.user });
-      return data;
-    } finally {
-      set({ loading: false });
-    }
-  },
-  refreshProfile: async () => {
-    const { data } = await api.get('/auth/profile');
-    localStorage.setItem('raremed_user', JSON.stringify(data.user));
-    set({ user: data.user });
-  },
-  updateProfile: async (payload) => {
-    const { data } = await api.put('/auth/profile', payload);
-    localStorage.setItem('raremed_user', JSON.stringify(data.user));
-    set({ user: data.user });
-    return data.user;
-  },
-  logout: () => {
-    localStorage.removeItem('raremed_token');
-    localStorage.removeItem('raremed_user');
-    set({ token: null, user: null });
-  },
-}));
+        if (!data?.token || !data?.user) {
+          throw new Error(data?.message || 'Login failed.');
+        }
+
+        get().setSession({ token: data.token, user: data.user });
+        return data;
+      },
+      register: async ({ name, email, password, confirmPassword, phoneNumber }) => {
+        const data = await authService.register({ name, email, password, confirmPassword, phoneNumber });
+
+        if (!data?.token || !data?.user) {
+          throw new Error(data?.message || 'Registration failed.');
+        }
+
+        get().setSession({ token: data.token, user: data.user });
+        return data;
+      },
+      logout: () => {
+        localStorage.removeItem('raremed_token');
+        set({ token: null, user: null });
+      },
+      updateProfile: async (profileData) => {
+        const data = await authService.updateProfile(profileData);
+        if (!data?.user) {
+          throw new Error(data?.message || 'Profile update failed.');
+        }
+        set({ user: data.user });
+        return data.user;
+      },
+      refreshProfile: async () => {
+        const token = get().token;
+        if (!token) {
+          return null;
+        }
+
+        const user = await authService.getProfile();
+        set({ user });
+        return user;
+      },
+    }),
+    {
+      name: 'rare-med-auth',
+      partialize: (state) => ({
+        token: state.token,
+        user: state.user,
+      }),
+    },
+  ),
+);
 
 export default useAuthStore;

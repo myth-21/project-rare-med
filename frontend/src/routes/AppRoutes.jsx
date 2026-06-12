@@ -19,9 +19,10 @@ import {
 import api from '../services/api';
 import GooglePharmacyMap from '../components/maps/GooglePharmacyMap.jsx';
 import { medicineImage, pharmacyImage, resolveMediaUrl } from '../utils/mediaUrl.js';
+import { directionsUrl, openMapsUrl } from '../utils/location.js';
 import useAuthStore from '../store/authStore';
 import useMedicineStore from '../store/medicineStore';
-import { availabilityLabels, categories } from '../utils/constants';
+import { API_BASE_URL, availabilityLabels, categories } from '../utils/constants';
 import { formatDate, formatDistance, initials } from '../utils/formatters';
 import { passwordStrength } from '../utils/validators';
 import MedicineCardView from '../components/medicines/MedicineCard.jsx';
@@ -36,8 +37,14 @@ import GoogleLoginButton from '../components/auth/GoogleLoginButton.jsx';
 import Footer from '../components/Footer.jsx';
 import BrandLogo from '../components/brand/Logo.jsx';
 import useGeolocation from '../hooks/useGeolocation.js';
+import AdminLoginPage from '../pages/admin/AdminLogin.jsx';
+import AdminDashboardPage from '../pages/admin/AdminDashboard.jsx';
+import ManageUsersPage from '../pages/admin/ManageUsers.jsx';
+import ManageMedicinesPage from '../pages/admin/ManageMedicines.jsx';
+import ManagePharmaciesPage from '../pages/admin/ManagePharmacies.jsx';
+import ManageReportsPage from '../pages/admin/ManageReports.jsx';
 
-const API_OR_GOOGLE = `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/auth/google`;
+const API_OR_GOOGLE = `${API_BASE_URL}/auth/google`;
 
 const page = {
   initial: { opacity: 0, y: 20 },
@@ -49,6 +56,38 @@ const page = {
 function Logo({ compact = false }) {
   return <BrandLogo compact={compact} />;
 }
+
+const locationQuery = (location) =>
+  location && typeof location.lat === 'number' && typeof location.lng === 'number'
+    ? { lat: location.lat, lng: location.lng, sort: 'distance' }
+    : { sort: 'distance' };
+
+const coordinateQuery = (location) =>
+  location && typeof location.lat === 'number' && typeof location.lng === 'number'
+    ? { lat: location.lat, lng: location.lng }
+    : {};
+
+const hasCoords = (location) => location && typeof location.lat === 'number' && typeof location.lng === 'number';
+
+const pharmaciesPath = (location, filters = {}) => {
+  const activeFilters = Object.entries(filters).filter(([, value]) => value !== '' && value !== false);
+  if (hasCoords(location) && activeFilters.length === 0) {
+    return `/pharmacies/nearby?${new URLSearchParams({ lat: location.lat, lng: location.lng }).toString()}`;
+  }
+  const params = new URLSearchParams(
+    Object.entries({ ...filters, ...locationQuery(location) }).filter(([, value]) => value !== '' && value !== false)
+  );
+  return `/pharmacies?${params.toString()}`;
+};
+
+const googleErrorMessages = {
+  redirect_uri_mismatch: 'Google sign-in is not configured for this website address yet.',
+  oauth_configuration: 'Google sign-in is not fully configured yet.',
+  not_configured: 'Google sign-in is not available yet.',
+  access_denied: 'Google sign-in was cancelled.',
+  missing_google_code: 'Google did not return a sign-in code. Please try again.',
+  google_auth_failed: 'Google sign-in could not be completed. Please try again.',
+};
 
 function LocationBanner({ location, status, error, onRetry }) {
   if (status === 'loading') {
@@ -64,11 +103,13 @@ function LocationBanner({ location, status, error, onRetry }) {
       <MapPinIcon />
       <span>
         {location?.isFallback
-          ? error || 'Showing pharmacies near Hyderabad (enable location for accurate results).'
-          : `Showing pharmacies near your location (${location?.lat?.toFixed(3)}, ${location?.lng?.toFixed(3)})`}
+          ? `Showing pharmacies near your profile city: ${location.label.replace('Profile: ', '')}.`
+          : location
+            ? 'Showing pharmacies nearest to your current location.'
+            : error || 'Allow location access to automatically sort pharmacies near you.'}
       </span>
       <button type="button" className="btn outline small" onClick={onRetry}>
-        {status === 'denied' ? 'Try again' : 'Refresh location'}
+        {location?.isFallback || status === 'denied' ? 'Try again' : 'Refresh location'}
       </button>
     </div>
   );
@@ -98,9 +139,9 @@ function Navbar() {
   }, []);
   const primaryLinks = [['/', 'Home'], ['/medicines', 'Medicines'], ['/pharmacies', 'Pharmacies'], ['/reports', 'Reports'], ['/alerts', 'Alerts']];
   const userLinks = user?.isAdmin
-    ? [['/admin', 'Admin Dashboard'], ['/admin/medicines', 'Manage Medicines'], ['/admin/reports', 'Manage Reports']]
+    ? [['/admin/dashboard', 'Admin Dashboard'], ['/admin/medicines', 'Manage Medicines'], ['/admin/reports', 'Manage Reports']]
     : user
-      ? [['/dashboard', 'Dashboard'], ['/profile', 'Profile']]
+      ? [['/profile', 'Profile']]
       : [['/login', 'Login'], ['/register', 'Register']];
   const links = [...primaryLinks, ...userLinks];
   return (
@@ -146,7 +187,16 @@ function ProtectedRoute({ children, admin = false }) {
   const { user, token } = useAuthStore();
   const location = useLocation();
   if (!token) return <Navigate to={`/login?returnUrl=${encodeURIComponent(location.pathname)}`} replace />;
-  if (admin && !user?.isAdmin) return <Navigate to="/dashboard" replace />;
+  if (admin && !user?.isAdmin) return <Navigate to="/profile" replace />;
+  return children;
+}
+
+function AdminProtectedRoute({ children }) {
+  const { user, token } = useAuthStore();
+  const location = useLocation();
+  if (!token || !user?.isAdmin) {
+    return <Navigate to={`/admin/login?returnUrl=${encodeURIComponent(location.pathname)}`} replace />;
+  }
   return children;
 }
 
@@ -167,12 +217,12 @@ function CountCard({ label, value, icon: Icon }) {
 
 function Home() {
   const navigate = useNavigate();
-  const { token } = useAuthStore();
+  const { token, user } = useAuthStore();
   const [query, setQuery] = useState('');
-  const { location, status, error, requestLocation } = useGeolocation();
-  const pharmacyQuery = `lat=${location.lat}&lng=${location.lng}&sort=distance`;
+  const { location, status, error, requestLocation } = useGeolocation({ profileCity: user?.city });
   const [medicines] = useApi('/medicines?sort=name', [], []);
-  const [pharmacies] = useApi(`/pharmacies?${pharmacyQuery}`, [], [pharmacyQuery]);
+  const pharmacyApiPath = pharmaciesPath(location);
+  const [pharmacies] = useApi(pharmacyApiPath, [], [pharmacyApiPath]);
   const [reports] = useApi('/reports', [], [token]);
   const search = () => navigate(token ? `/medicines?search=${encodeURIComponent(query)}` : '/login?returnUrl=/medicines');
   return (
@@ -226,10 +276,14 @@ function Home() {
 function AuthPage({ mode }) {
   const navigate = useNavigate();
   const params = new URLSearchParams(useLocation().search);
+  const googleError = params.get('googleError');
   const { login, register, loading } = useAuthStore();
   const [show, setShow] = useState(false);
   const [form, setForm] = useState({ name: '', email: '', password: '', confirmPassword: '', phone: '', terms: false, remember: true });
   const strength = passwordStrength(form.password);
+  useEffect(() => {
+    if (googleError) toast.error(googleErrorMessages[googleError] || googleErrorMessages.google_auth_failed);
+  }, [googleError]);
   const submit = async (e) => {
     e.preventDefault();
     try {
@@ -245,7 +299,7 @@ function AuthPage({ mode }) {
       } else {
         toast.success('Welcome back to Rare Med');
       }
-      navigate(data.user?.isAdmin ? '/admin' : params.get('returnUrl') || '/dashboard');
+      navigate(data.user?.isAdmin ? '/admin' : params.get('returnUrl') || '/profile');
     } catch (error) {
       toast.error(error.response?.data?.message || 'Authentication failed');
     }
@@ -380,7 +434,7 @@ function useApi(path, fallback, deps = []) {
 function EmptyNotice({ message, error }) {
   return (
     <div className="card" style={{ gridColumn: '1 / -1', textAlign: 'center', padding: '2rem' }}>
-      {error && <p style={{ color: '#DC2626', marginBottom: '8px' }}>{error}</p>}
+      {error && <p style={{ color: '#DC2626', marginBottom: '8px' }}>We could not load this data right now.</p>}
       <p style={{ color: '#64748B' }}>{message}</p>
     </div>
   );
@@ -395,7 +449,11 @@ function Medicines() {
   const initial = new URLSearchParams(location.search).get('search') || '';
   const [filters, setFilters] = useState({ search: initial, category: '', availability: '', sort: 'name' });
   const [suggestions, setSuggestions] = useState([]);
-  const query = new URLSearchParams(Object.entries(filters).filter(([, v]) => v)).toString();
+  const { user } = useAuthStore();
+  const { location: userLocation, status, error: locationError, requestLocation } = useGeolocation({ profileCity: user?.city });
+  const query = new URLSearchParams(
+    Object.entries({ ...filters, ...coordinateQuery(userLocation) }).filter(([, v]) => v)
+  ).toString();
   const [medicines, , loading, error] = useApi(`/medicines?${query}`, [], [query]);
   const { addSearch } = useMedicineStore();
   const recordSearch = (term) => {
@@ -412,6 +470,7 @@ function Medicines() {
   return (
     <Page>
       <Toolbar title="Medicines" subtitle="Search and filter verified rare medicine inventory." />
+      <LocationBanner location={userLocation} status={status} error={locationError} onRetry={requestLocation} />
       <div className="listing">
         <aside className="filters">
           <input list="medicine-suggestions" placeholder="Search medicine, generic, manufacturer" value={filters.search} onChange={(e) => { setFilters({ ...filters, search: e.target.value }); recordSearch(e.target.value); }} />
@@ -426,9 +485,9 @@ function Medicines() {
         </aside>
         <div className="card-grid">
           {loading && <p>Loading medicines...</p>}
-          {!loading && error && <EmptyNotice error={error} message="Start the backend (npm run dev) and ensure MongoDB is connected." />}
+          {!loading && error && <EmptyNotice error={error} message="Medicine data is temporarily unavailable." />}
           {!loading && !error && medicines.length === 0 && (
-            <EmptyNotice message="No medicines in database. Restart the backend to auto-seed, or run: cd Backend && npm run seed" />
+            <EmptyNotice message="No medicines are available yet." />
           )}
           {medicines.map((medicine) => <MedicineCardView key={medicine._id} medicine={medicine} />)}
         </div>
@@ -439,8 +498,10 @@ function Medicines() {
 
 function MedicineDetails() {
   const { id } = useParams();
-  const { location } = useGeolocation({ requestOnMount: false });
-  const [body, , loading, error] = useApi(`/medicines/${id}`, { medicine: null, related: [] }, [id]);
+  const { user } = useAuthStore();
+  const { location } = useGeolocation({ profileCity: user?.city });
+  const geoQuery = new URLSearchParams(coordinateQuery(location)).toString();
+  const [body, , loading, error] = useApi(`/medicines/${id}?${geoQuery}`, { medicine: null, related: [] }, [id, geoQuery]);
   const medicine = body.medicine || body;
   const related = body.related || [];
   if (loading) return <Page><p>Loading medicine...</p></Page>;
@@ -465,7 +526,7 @@ function MedicineDetails() {
   return (
     <Page>
       <section className="detail-hero">
-        <img className="detail-image" src={medicineImage(medicine)} alt={medicine.name} onError={(e) => { e.currentTarget.src = '/medicines/fallback.svg'; }} />
+        <img className="detail-image" src={medicineImage(medicine)} alt={medicine.name} onError={(e) => { e.currentTarget.src = '/medicines/fallback.png'; }} />
         <div><span className="category">{medicine.category}</span><h1>{medicine.name}</h1><p>{medicine.genericName} by {medicine.manufacturer}</p><Status value={medicine.availability} /></div>
         <Button onClick={setAlert}><BellIcon /> Set Alert</Button>
       </section>
@@ -475,11 +536,16 @@ function MedicineDetails() {
         <article className="card">
           <h2>Available At</h2>
           {pharmacies.length === 0 && <p>No verified stockists currently listed.</p>}
-          {pharmacies.map((p, index) => (
+          {pharmacies.map((p) => (
             <div className="stock-row" key={p._id || p.name}>
               <strong>{p.name}</strong>
               <span>{p.address}, {p.city}, {p.state}</span>
-              <span>{p.phone || 'Phone unavailable'} · {p.isVerified ? 'Verified pharmacy' : 'Community reported'}</span>
+              {p.distanceKm != null && <span>{formatDistance(p.distanceKm)}</span>}
+              <span>{p.phone || 'Phone unavailable'} - {p.isVerified ? 'Verified pharmacy' : 'Community reported'}</span>
+              <span className="map-link-row">
+                <a href={directionsUrl(p)} target="_blank" rel="noreferrer">Get Directions</a>
+                <a href={openMapsUrl(p)} target="_blank" rel="noreferrer">Open in Maps</a>
+              </span>
             </div>
           ))}
         </article>
@@ -492,12 +558,10 @@ function MedicineDetails() {
 
 function Pharmacies() {
   const [filters, setFilters] = useState({ search: '', city: '', rare: false });
-  const { location, status, error, requestLocation } = useGeolocation();
-  const params = new URLSearchParams(
-    Object.entries({ ...filters, lat: location.lat, lng: location.lng, sort: 'distance' }).filter(([, v]) => v !== '' && v !== false)
-  );
-  const query = params.toString();
-  const [pharmacies, , loading, apiError] = useApi(`/pharmacies?${query}`, [], [query]);
+  const { user } = useAuthStore();
+  const { location, status, error, requestLocation } = useGeolocation({ profileCity: user?.city });
+  const apiPath = pharmaciesPath(location, filters);
+  const [pharmacies, , loading, apiError] = useApi(apiPath, [], [apiPath]);
   return (
     <Page>
       <Toolbar title="Pharmacies" subtitle="Find verified pharmacies with medicine coverage and real map locations." />
@@ -506,9 +570,9 @@ function Pharmacies() {
       <div className="two-col map-layout">
         <div className="card-grid">
           {loading && <p>Loading pharmacies...</p>}
-          {!loading && apiError && <EmptyNotice error={apiError} message="Cannot reach the API. Check VITE_API_URL and backend server." />}
+          {!loading && apiError && <EmptyNotice error={apiError} message="Pharmacy data is temporarily unavailable." />}
           {!loading && !apiError && pharmacies.length === 0 && (
-            <EmptyNotice message="No pharmacies in database. Restart backend to auto-seed or run npm run seed in Backend." />
+            <EmptyNotice message="No pharmacies are available yet." />
           )}
           {pharmacies.map((p) => <PharmacyCardView key={p._id} pharmacy={p} />)}
         </div>
@@ -520,8 +584,9 @@ function Pharmacies() {
 
 function PharmacyDetails() {
   const { id } = useParams();
-  const { location } = useGeolocation({ requestOnMount: false });
-  const geoQuery = `lat=${location.lat}&lng=${location.lng}`;
+  const { user } = useAuthStore();
+  const { location } = useGeolocation({ profileCity: user?.city });
+  const geoQuery = new URLSearchParams(coordinateQuery(location)).toString();
   const [body, , loading, error] = useApi(`/pharmacies/${id}?${geoQuery}`, { pharmacy: null }, [id, geoQuery]);
   const pharmacy = body.pharmacy || body;
   const medicines = pharmacy?.availableMedicines || [];
@@ -536,19 +601,13 @@ function PharmacyDetails() {
     );
   }
 
-  const lat = pharmacy.location?.latitude;
-  const lng = pharmacy.location?.longitude;
-  const directionsUrl = typeof lat === 'number' && typeof lng === 'number'
-    ? `https://www.google.com/maps/dir/?api=1&destination=${lat},${lng}`
-    : `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(`${pharmacy.name} ${pharmacy.address} ${pharmacy.city}`)}`;
-
   const logoSrc = pharmacy.logo ? resolveMediaUrl(pharmacy.logo) : '';
 
   return (
     <Page>
       <section className="detail-hero">
         <div className="pharmacy-detail-media">
-          <img className="detail-image" src={pharmacyImage(pharmacy)} alt={`${pharmacy.name} storefront`} onError={(e) => { e.currentTarget.src = '/pharmacies/fallback.svg'; }} />
+          <img className="detail-image" src={pharmacyImage(pharmacy)} alt={`${pharmacy.name} storefront`} onError={(e) => { e.currentTarget.src = pharmacyImage({ name: pharmacy.name }); }} />
           {logoSrc && (
             <img className="pharmacy-detail-logo" src={logoSrc} alt="" onError={(e) => { e.currentTarget.style.display = 'none'; }} />
           )}
@@ -560,7 +619,8 @@ function PharmacyDetails() {
           <p>{pharmacy.openHours} · {pharmacy.phone || 'Phone not listed'}</p>
         </div>
         <div className="cta-row">
-          <a href={directionsUrl} className="btn" target="_blank" rel="noreferrer">Directions</a>
+          <a href={directionsUrl(pharmacy)} className="btn" target="_blank" rel="noreferrer">Get Directions</a>
+          <a href={openMapsUrl(pharmacy)} className="btn outline" target="_blank" rel="noreferrer">Open in Maps</a>
           <Button as={Link} to="/reports" className="outline">Submit Report</Button>
         </div>
       </section>
@@ -644,11 +704,199 @@ function Alerts() {
 }
 
 function Dashboard() {
-  const { user } = useAuthStore();
+  const { user, updateProfile, setSession } = useAuthStore();
   const { saved, recentSearches } = useMedicineStore();
   const savedCount = user?.savedMedicines?.length || saved.length;
   const searchCount = user?.searchHistory?.length || recentSearches.length;
-  return <Page><Toolbar title={`Welcome, ${user?.name || 'Rare Med user'}`} subtitle="Your medicine discovery hub for saved medicines, availability alerts, and nearby pharmacies." /><DashboardStats savedCount={savedCount} searchCount={searchCount} /><div className="two-col"><article className="card"><h2>Quick Actions</h2><div className="quick"><Button as={Link} to="/medicines">Search Medicine</Button><Button as={Link} to="/reports">Report Shortage</Button><Button as={Link} to="/alerts">Set Alert</Button><Button as={Link} to="/pharmacies">Find Pharmacy</Button></div></article><article className="card"><h2>Profile Summary</h2><p>{user?.email}</p><p>{user?.phoneNumber || 'Add phone in profile'}</p><p>{user?.city || 'Add city in profile'} {user?.state || ''}</p><p>{user?.isAdmin ? 'Admin access' : 'Standard account'}</p></article></div><article className="card"><h2>Search History</h2>{(user?.searchHistory?.length ? user.searchHistory.map((x) => x.term) : recentSearches).slice(0, 8).map((x) => <p key={x}>{x}</p>)}</article></Page>;
+  const [form, setForm] = useState({
+    name: user?.name || '',
+    phoneNumber: user?.phoneNumber || '',
+    city: user?.city || '',
+    state: user?.state || '',
+    notificationPreferences: user?.notificationPreferences || { email: true, inApp: true },
+  });
+  const [uploading, setUploading] = useState(false);
+
+  useEffect(() => {
+    setForm({
+      name: user?.name || '',
+      phoneNumber: user?.phoneNumber || '',
+      city: user?.city || '',
+      state: user?.state || '',
+      notificationPreferences: user?.notificationPreferences || { email: true, inApp: true },
+    });
+  }, [user]);
+
+  const saveProfile = async (e) => {
+    e.preventDefault();
+    try {
+      await updateProfile(form);
+      toast.success('Profile updated');
+    } catch {
+      toast.error('Failed to update profile');
+    }
+  };
+
+  const handleAvatarChange = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const formData = new FormData();
+    formData.append('avatar', file);
+
+    setUploading(true);
+    try {
+      const { data } = await api.post('/auth/upload-avatar', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      setSession({ token: localStorage.getItem('raremed_token'), user: data.user });
+      toast.success('Avatar updated successfully');
+    } catch (error) {
+      toast.error(error.response?.data?.message || 'Avatar upload failed');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const profileFields = (
+    <article className="card">
+      <h2>Account Profile</h2>
+      <form onSubmit={saveProfile} style={{ display: 'grid', gap: '1rem' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '20px', marginBottom: '10px' }}>
+          <div style={{ position: 'relative', cursor: 'pointer' }} onClick={() => document.getElementById('avatar-input').click()}>
+            {user?.profilePicture ? (
+              <img
+                src={resolveMediaUrl(user.profilePicture)}
+                alt={user.name}
+                style={{ width: '96px', height: '96px', borderRadius: '50%', objectFit: 'cover', border: '3px solid var(--primary-light)' }}
+              />
+            ) : (
+              <div className="avatar big">{initials(user?.name)}</div>
+            )}
+            <div
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                right: 0,
+                background: 'var(--primary)',
+                borderRadius: '50%',
+                width: '28px',
+                height: '28px',
+                display: 'grid',
+                placeItems: 'center',
+                color: '#fff',
+                fontSize: '11px',
+                boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+              }}
+            >
+              UP
+            </div>
+          </div>
+          <div>
+            <p style={{ margin: 0, fontWeight: 'bold', color: 'var(--secondary)' }}>
+              {uploading ? 'Uploading avatar...' : 'Click picture to upload custom avatar'}
+            </p>
+            <p style={{ margin: '4px 0 0', fontSize: '12px' }}>Supported formats: PNG, JPG (Max 5MB)</p>
+            {user?.profilePicture && (
+              <button
+                type="button"
+                className="ghost"
+                style={{ marginTop: '8px', fontSize: '12px' }}
+                onClick={async () => {
+                  try {
+                    const { data } = await api.delete('/auth/avatar');
+                    setSession({ token: localStorage.getItem('raremed_token'), user: data.user });
+                    toast.success('Profile photo removed');
+                  } catch {
+                    toast.error('Could not remove photo');
+                  }
+                }}
+              >
+                Remove photo
+              </button>
+            )}
+          </div>
+          <input
+            id="avatar-input"
+            type="file"
+            accept="image/*"
+            style={{ display: 'none' }}
+            onChange={handleAvatarChange}
+            disabled={uploading}
+          />
+        </div>
+
+        <label className="floating">
+          <input required value={form.name || ''} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder=" " />
+          <span>Full Name</span>
+        </label>
+
+        <label className="floating">
+          <input disabled value={user?.email || ''} style={{ background: '#F1F5F9', cursor: 'not-allowed' }} placeholder=" " />
+          <span>Email (Non-editable)</span>
+        </label>
+
+        <label className="floating">
+          <input value={form.phoneNumber || ''} onChange={(e) => setForm({ ...form, phoneNumber: e.target.value })} placeholder=" " />
+          <span>Phone Number</span>
+        </label>
+
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+          <label className="floating">
+            <input value={form.city || ''} onChange={(e) => setForm({ ...form, city: e.target.value })} placeholder=" " />
+            <span>City</span>
+          </label>
+          <label className="floating">
+            <input value={form.state || ''} onChange={(e) => setForm({ ...form, state: e.target.value })} placeholder=" " />
+            <span>State</span>
+          </label>
+        </div>
+
+        <label className="check">
+          <input
+            type="checkbox"
+            checked={form.notificationPreferences?.email ?? true}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                notificationPreferences: { ...(form.notificationPreferences || {}), email: e.target.checked },
+              })
+            }
+          />
+          Email notifications when saved medicines are in stock
+        </label>
+
+        <Button disabled={uploading}>Save Profile Changes</Button>
+      </form>
+    </article>
+  );
+
+  return (
+    <Page>
+      <Toolbar title={`Welcome, ${user?.name || 'Rare Med user'}`} subtitle="Your medicine discovery hub for saved medicines, availability alerts, and nearby pharmacies." />
+      <DashboardStats savedCount={savedCount} searchCount={searchCount} />
+      <div className="two-col">
+        <article className="card">
+          <h2>Quick Actions</h2>
+          <div className="quick">
+            <Button as={Link} to="/medicines">Search Medicine</Button>
+            <Button as={Link} to="/reports">Report Shortage</Button>
+            <Button as={Link} to="/alerts">Set Alert</Button>
+            <Button as={Link} to="/pharmacies">Find Pharmacy</Button>
+          </div>
+        </article>
+        <article className="card">
+          <h2>Profile Summary</h2>
+          <p>{user?.email}</p>
+          <p>{user?.phoneNumber || 'Add phone in profile'}</p>
+          <p>{user?.city || 'Add city in profile'} {user?.state || ''}</p>
+          <p>{user?.isAdmin ? 'Admin access' : 'Standard account'}</p>
+        </article>
+      </div>
+      <article className="card"><h2>Search History</h2>{(user?.searchHistory?.length ? user.searchHistory.map((x) => x.term) : recentSearches).slice(0, 8).map((x) => <p key={x}>{x}</p>)}</article>
+      {profileFields}
+    </Page>
+  );
 }
 
 function Profile() {
@@ -878,7 +1126,9 @@ function GoogleOAuthSuccess() {
   const navigate = useNavigate();
   const { setSession, refreshProfile } = useAuthStore();
   useEffect(() => {
-    const token = new URLSearchParams(window.location.search).get('token');
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get('token');
+    const mode = params.get('mode');
     if (token) {
       // Set the token first (this will be added to authorization headers by axios interceptor)
       setSession({ token, user: null });
@@ -886,8 +1136,8 @@ function GoogleOAuthSuccess() {
       // Fetch the actual user profile from backend database
       refreshProfile()
         .then(() => {
-          toast.success('Google sign-in complete');
-          navigate('/dashboard');
+          toast.success(mode === 'signup' ? 'Google account created successfully' : 'Google sign-in complete');
+          navigate('/profile');
         })
         .catch((error) => {
           console.error('Failed to load user profile after Google sign-in:', error);
@@ -919,15 +1169,21 @@ export default function AppRoutes() {
           <Route path="/forgot-password" element={<ForgotPassword />} />
           <Route path="/reset-password" element={<ResetPassword />} />
           <Route path="/google-success" element={<GoogleOAuthSuccess />} />
-          <Route path="/dashboard" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/dashboard" element={<Navigate to="/profile" replace />} />
           <Route path="/medicines" element={<ProtectedRoute><Medicines /></ProtectedRoute>} />
           <Route path="/medicines/:id" element={<ProtectedRoute><MedicineDetails /></ProtectedRoute>} />
           <Route path="/pharmacies" element={<ProtectedRoute><Pharmacies /></ProtectedRoute>} />
           <Route path="/pharmacies/:id" element={<ProtectedRoute><PharmacyDetails /></ProtectedRoute>} />
           <Route path="/reports" element={<ProtectedRoute><Reports /></ProtectedRoute>} />
           <Route path="/alerts" element={<ProtectedRoute><Alerts /></ProtectedRoute>} />
-          <Route path="/profile" element={<ProtectedRoute><Profile /></ProtectedRoute>} />
-          <Route path="/admin/*" element={<ProtectedRoute admin><AdminLayout /></ProtectedRoute>} />
+          <Route path="/profile" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+          <Route path="/admin/login" element={<AdminLoginPage />} />
+          <Route path="/admin" element={<Navigate to="/admin/dashboard" replace />} />
+          <Route path="/admin/dashboard" element={<AdminProtectedRoute><AdminDashboardPage /></AdminProtectedRoute>} />
+          <Route path="/admin/users" element={<AdminProtectedRoute><ManageUsersPage /></AdminProtectedRoute>} />
+          <Route path="/admin/medicines" element={<AdminProtectedRoute><ManageMedicinesPage /></AdminProtectedRoute>} />
+          <Route path="/admin/pharmacies" element={<AdminProtectedRoute><ManagePharmaciesPage /></AdminProtectedRoute>} />
+          <Route path="/admin/reports" element={<AdminProtectedRoute><ManageReportsPage /></AdminProtectedRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </AnimatePresence>
@@ -935,5 +1191,4 @@ export default function AppRoutes() {
     </>
   );
 }
-
 

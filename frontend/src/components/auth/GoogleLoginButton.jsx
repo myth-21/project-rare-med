@@ -1,7 +1,8 @@
 import { motion } from 'framer-motion';
+import { API_BASE_URL } from '../../utils/constants';
 
 const GoogleLoginButton = ({ onClick, loading = false }) => {
-  const API_OR_GOOGLE = `${import.meta.env.VITE_API_URL || 'http://localhost:5000/api'}/auth/google`;
+  const API_OR_GOOGLE = `${API_BASE_URL}/auth/google`;
 
   return (
     <motion.a

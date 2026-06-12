@@ -4,8 +4,11 @@ export const validateEnv = () => {
   const warnings = [];
   const errors = [];
 
-  if (!process.env.JWT_SECRET || process.env.JWT_SECRET.length < 16) {
-    warnings.push('JWT_SECRET is missing or weak — set a long random secret in .env');
+  // JWT_SECRET is CRITICAL - must be present and strong
+  if (!process.env.JWT_SECRET) {
+    errors.push('JWT_SECRET is required - set a long random secret in .env');
+  } else if (process.env.JWT_SECRET.length < 16) {
+    errors.push('JWT_SECRET must be at least 16 characters long');
   }
 
   if (!process.env.MONGO_URI) {

@@ -1,106 +1,119 @@
+import asyncHandler from 'express-async-handler';
 import Report from '../models/Report.js';
-import Medicine from '../models/Medicine.js';
 
-export const listReports = async (req, res, next) => {
-  try {
-    const query = req.query.status ? { status: req.query.status } : {};
-    const reports = await Report.find(query)
-      .populate('reportedBy', 'name email')
-      .populate('medicine', 'name category')
-      .populate('pharmacy', 'name city')
-      .sort('-createdAt')
-      .lean();
-    const formatted = reports.map((r) => ({
-      ...r,
-      submittedBy: r.reportedBy,
-    }));
-    res.json({ reports: formatted });
-  } catch (error) {
-    next(error);
+// GET /api/reports - List reports with filtering
+export const listReports = asyncHandler(async (req, res) => {
+  const { medicineId, pharmacyId, sort = '-createdAt' } = req.query;
+
+  let query = { status: 'approved' }; // Only show approved reports publicly
+
+  if (medicineId) {
+    query.medicineId = medicineId;
   }
-};
 
-export const createReport = async (req, res, next) => {
-  try {
-    const payload = {
-      medicine: req.body.medicine || undefined,
-      pharmacy: req.body.pharmacy || undefined,
-      medicineName: req.body.medicineName || req.body.medicine || '',
-      pharmacyName: req.body.pharmacyName || '',
-      location: req.body.location || req.body.city || 'Location not specified',
-      notes: req.body.notes || req.body.description || '',
-      description: req.body.description || req.body.notes || '',
-      availabilityStatus: req.body.availabilityStatus || req.body.reportedAvailability || 'available',
-      severity: req.body.severity || 'medium',
-      status: 'pending',
-      submittedAt: new Date(),
-      reportedBy: req.user._id,
-    };
-    if (!payload.medicineName && payload.medicine) {
-      const medicine = await Medicine.findById(payload.medicine).select('name');
-      payload.medicineName = medicine?.name || 'Medicine report';
-    }
-    if (!payload.medicineName) return res.status(400).json({ message: 'Medicine is required' });
-    const report = await Report.create(payload);
-    res.status(201).json({ report });
-  } catch (error) {
-    next(error);
+  if (pharmacyId) {
+    query.pharmacyId = pharmacyId;
   }
-};
 
-export const updateReport = async (req, res, next) => {
-  try {
-    const update = { ...req.body };
-    if (['approved', 'verified', 'resolved', 'rejected'].includes(update.status)) {
-      update.reviewedAt = new Date();
-      if (req.user?._id !== 'env-admin') update.reviewedBy = req.user._id;
-    }
-    const report = await Report.findByIdAndUpdate(req.params.id, update, { new: true, runValidators: true });
-    if (!report) return res.status(404).json({ message: 'Report not found' });
-    if (['approved', 'verified', 'resolved'].includes(report.status) && report.medicine) {
-      const medicine = await Medicine.findById(report.medicine);
-      if (medicine) {
-        medicine.availability = report.availabilityStatus || 'available';
-        if (report.pharmacy && !medicine.pharmacies.some((id) => String(id) === String(report.pharmacy))) {
-          medicine.pharmacies.push(report.pharmacy);
-        }
-        await medicine.save();
-      }
-    }
-    res.json({ report });
-  } catch (error) {
-    next(error);
+  const reports = await Report.find(query)
+    .populate('medicineId', 'name genericName')
+    .populate('pharmacyId', 'name city')
+    .populate('userId', 'name email')
+    .sort(sort === '-createdAt' ? { createdAt: -1 } : { upvotes: -1 })
+    .limit(100);
+
+  res.json(reports);
+});
+
+// POST /api/reports - Create report (authenticated users only)
+export const createReport = asyncHandler(async (req, res) => {
+  const { medicineId, pharmacyId, status, notes } = req.body;
+
+  if (!medicineId || !pharmacyId || !status) {
+    return res.status(400).json({ message: 'Medicine ID, pharmacy ID, and status are required' });
   }
-};
 
-export const approveReport = async (req, res, next) => {
-  req.body = { ...req.body, status: 'approved' };
-  return updateReport(req, res, next);
-};
+  const report = await Report.create({
+    medicineId,
+    pharmacyId,
+    userId: req.user._id,
+    status,
+    notes: notes || '',
+    upvotes: 0,
+  });
 
-export const rejectReport = async (req, res, next) => {
-  req.body = { ...req.body, status: 'rejected' };
-  return updateReport(req, res, next);
-};
+  res.status(201).json(report);
+});
 
-export const upvoteReport = async (req, res, next) => {
-  try {
-    const report = await Report.findById(req.params.id);
-    if (!report) return res.status(404).json({ message: 'Report not found' });
-    const voted = report.upvotes.some((id) => id.equals(req.user._id));
-    report.upvotes = voted ? report.upvotes.filter((id) => !id.equals(req.user._id)) : [...report.upvotes, req.user._id];
-    await report.save();
-    res.json({ report });
-  } catch (error) {
-    next(error);
+// PATCH /api/reports/:id/upvote - Upvote report
+export const upvoteReport = asyncHandler(async (req, res) => {
+  const report = await Report.findByIdAndUpdate(
+    req.params.id,
+    { $inc: { upvotes: 1 } },
+    { new: true }
+  );
+
+  if (!report) {
+    return res.status(404).json({ message: 'Report not found' });
   }
-};
 
-export const deleteReport = async (req, res, next) => {
-  try {
-    await Report.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Report deleted' });
-  } catch (error) {
-    next(error);
+  res.json({ message: 'Report upvoted', upvotes: report.upvotes });
+});
+
+// PATCH /api/reports/:id/approve - Approve report (admin only)
+export const approveReport = asyncHandler(async (req, res) => {
+  const report = await Report.findByIdAndUpdate(
+    req.params.id,
+    { status: 'approved' },
+    { new: true }
+  );
+
+  if (!report) {
+    return res.status(404).json({ message: 'Report not found' });
   }
-};
+
+  res.json({ message: 'Report approved', report });
+});
+
+// PATCH /api/reports/:id/reject - Reject report (admin only)
+export const rejectReport = asyncHandler(async (req, res) => {
+  const report = await Report.findByIdAndUpdate(
+    req.params.id,
+    { status: 'rejected' },
+    { new: true }
+  );
+
+  if (!report) {
+    return res.status(404).json({ message: 'Report not found' });
+  }
+
+  res.json({ message: 'Report rejected', report });
+});
+
+// PUT /api/reports/:id - Update report (admin only)
+export const updateReport = asyncHandler(async (req, res) => {
+  const { status, notes } = req.body;
+
+  const report = await Report.findByIdAndUpdate(
+    req.params.id,
+    { status, notes },
+    { new: true, runValidators: true }
+  );
+
+  if (!report) {
+    return res.status(404).json({ message: 'Report not found' });
+  }
+
+  res.json(report);
+});
+
+// DELETE /api/reports/:id - Delete report (admin only)
+export const deleteReport = asyncHandler(async (req, res) => {
+  const report = await Report.findByIdAndDelete(req.params.id);
+
+  if (!report) {
+    return res.status(404).json({ message: 'Report not found' });
+  }
+
+  res.json({ message: 'Report deleted successfully' });
+});

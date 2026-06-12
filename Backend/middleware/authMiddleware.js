@@ -2,34 +2,51 @@ import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 
 export const requireAuth = async (req, res, next) => {
-  try {
-    const header = req.headers.authorization || '';
-    const token = header.startsWith('Bearer ') ? header.slice(7) : null;
-    if (!token) return res.status(401).json({ message: 'Authentication required' });
+  let token;
 
-    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'raremed_dev_secret');
-    if (decoded.isAdmin && String(decoded.email || '').toLowerCase() === String(process.env.ADMIN_EMAIL || '').toLowerCase()) {
-      req.user = {
-        _id: 'env-admin',
-        id: 'env-admin',
-        name: 'Rare Med Admin',
-        email: decoded.email,
-        isAdmin: true,
-        isActive: true,
-        profilePicture: '',
-      };
-      return next();
-    }
+  if (
+    req.headers.authorization &&
+    req.headers.authorization.startsWith('Bearer ')
+  ) {
+    token = req.headers.authorization.split(' ')[1];
+  }
+
+  if (!token) {
+    res.status(401);
+    return next(new Error('Authorization token is missing.'));
+  }
+
+  try {
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded.id).select('-password');
-    if (!user || !user.isActive) return res.status(401).json({ message: 'Account is disabled' });
-    req.user = user;
+
+    if (!user) {
+      res.status(401);
+      throw new Error('User not found.');
+    }
+
+    req.user = {
+      id: user._id,
+      email: user.email,
+      name: user.name,
+      profilePicture: user.profilePicture,
+      googleId: user.googleId,
+      isAdmin: user.isAdmin,
+      isActive: user.isActive,
+      createdAt: user.createdAt,
+    };
+
     next();
   } catch (error) {
-    res.status(401).json({ message: 'Invalid or expired token' });
+    res.status(401);
+    next(new Error('Not authorized, token invalid.'));
   }
 };
 
 export const requireAdmin = (req, res, next) => {
-  if (!req.user?.isAdmin) return res.status(403).json({ message: 'Admin access required' });
+  if (!req.user?.isAdmin) {
+    res.status(403);
+    return next(new Error('Admin access required.'));
+  }
   next();
 };

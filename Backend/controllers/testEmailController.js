@@ -1,16 +1,11 @@
-import { sendWelcomeEmail } from '../services/emailService.js';
+import asyncHandler from 'express-async-handler';
+import log from '../utils/logger.js';
 
-export const testWelcomeEmail = async (req, res, next) => {
-  try {
-    const email = req.query.email || process.env.SMTP_USER;
-    await sendWelcomeEmail(email, 'Rare Med Test User');
-
-    res.json({
-      success: true,
-      message: 'Email sent successfully',
-    });
-  } catch (error) {
-    console.error('Email Error:', error.message);
-    next(error);
-  }
-};
+// GET /api/test-email - Test email endpoint (disabled for security)
+export const testWelcomeEmail = asyncHandler(async (req, res) => {
+  log.warn('[Email] Test email endpoint called');
+  res.json({
+    message: 'Test email functionality disabled',
+    note: 'Email sending is not configured in this build',
+  });
+});

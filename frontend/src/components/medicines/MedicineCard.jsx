@@ -6,11 +6,13 @@ import { HeartIcon as HeartSolid } from '@heroicons/react/24/solid';
 import useAuthStore from '../../store/authStore';
 import api from '../../services/api';
 import { medicineImage } from '../../utils/mediaUrl.js';
+import { formatDistance } from '../../utils/formatters.js';
 
 const MedicineCard = ({ medicine }) => {
   const { user, setSession } = useAuthStore();
   const [isSaved, setIsSaved] = useState(false);
   const [saving, setSaving] = useState(false);
+  const nearestPharmacy = (medicine.pharmacies || []).find((pharmacy) => pharmacy.distanceKm != null);
 
   useEffect(() => {
     if (user?.savedMedicines) {
@@ -83,7 +85,7 @@ const MedicineCard = ({ medicine }) => {
           alt={medicine.name}
           style={{ width: '100%', height: '100%', objectFit: 'contain' }}
           onError={(e) => {
-            e.currentTarget.src = '/medicines/fallback.svg';
+            e.currentTarget.src = '/medicines/fallback.png';
           }}
         />
       </div>
@@ -98,6 +100,11 @@ const MedicineCard = ({ medicine }) => {
       <span style={{ fontSize: '13px', color: '#64748B', display: 'block', marginTop: '8px' }}>
         {medicine.pharmacies?.length || 0} verified stockists
       </span>
+      {nearestPharmacy && (
+        <span style={{ fontSize: '13px', color: '#166534', display: 'block', marginTop: '4px', fontWeight: 700 }}>
+          Nearest: {nearestPharmacy.name} ({formatDistance(nearestPharmacy.distanceKm)})
+        </span>
+      )}
       <Link className="btn" to={`/medicines/${medicine._id}`} style={{ marginTop: '12px' }}>View Details</Link>
     </article>
   );

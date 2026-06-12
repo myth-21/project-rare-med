@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { MapContainer, Marker, Popup, TileLayer } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
@@ -6,6 +6,7 @@ import 'leaflet/dist/leaflet.css';
 import markerIcon2x from 'leaflet/dist/images/marker-icon-2x.png';
 import markerIcon from 'leaflet/dist/images/marker-icon.png';
 import markerShadow from 'leaflet/dist/images/marker-shadow.png';
+import { directionsUrl, getPharmacyCoords, openMapsUrl } from '../../utils/location.js';
 
 delete L.Icon.Default.prototype._getIconUrl;
 L.Icon.Default.mergeOptions({
@@ -14,40 +15,29 @@ L.Icon.Default.mergeOptions({
   shadowUrl: markerShadow,
 });
 
-const coords = (pharmacy) => {
-  const lat = pharmacy?.location?.latitude ?? pharmacy?.latitude ?? pharmacy?.coordinates?.lat;
-  const lng = pharmacy?.location?.longitude ?? pharmacy?.longitude ?? pharmacy?.coordinates?.lng;
-  if (typeof lat === 'number' && typeof lng === 'number') return { lat, lng };
-  return null;
-};
-
-function useUserLocation() {
-  const [position, setPosition] = useState(null);
-  useEffect(() => {
-    if (!navigator.geolocation) return;
-    navigator.geolocation.getCurrentPosition(
-      (pos) => setPosition({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-      () => {},
-      { enableHighAccuracy: false, timeout: 10000, maximumAge: 60000 }
-    );
-  }, []);
-  return position;
-}
+const INDIA_CENTER = { lat: 20.5937, lng: 78.9629 };
 
 const LocationLinks = ({ pharmacies }) => (
   <div className="map-locations">
-    {pharmacies.map((p) => {
-      const position = coords(p);
+    {pharmacies.map((pharmacy) => {
+      const position = getPharmacyCoords(pharmacy);
       if (!position) return null;
-      const mapsUrl = `https://www.google.com/maps/search/?api=1&query=${position.lat},${position.lng}`;
-      const dirUrl = `https://www.google.com/maps/dir/?api=1&destination=${position.lat},${position.lng}`;
+      const meds = pharmacy.availableMedicines || pharmacy.medicines || [];
       return (
-        <div key={p._id || p.name} className="direction-link" style={{ display: 'grid', gap: '6px' }}>
-          <strong>{p.name}</strong>
-          <span>{p.address}, {p.city}</span>
-          <span style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-            <a href={dirUrl} target="_blank" rel="noreferrer">Directions</a>
-            <a href={mapsUrl} target="_blank" rel="noreferrer">Open in Google Maps</a>
+        <div key={pharmacy._id || pharmacy.name} className="direction-link">
+          <strong>{pharmacy.name}</strong>
+          <span>
+            {pharmacy.address}, {pharmacy.city}
+          </span>
+          {pharmacy.distanceKm != null && <span>{pharmacy.distanceKm.toFixed(1)} km away</span>}
+          {meds.length > 0 && <span>{meds.slice(0, 3).map((m) => m.name).join(', ')}</span>}
+          <span className="map-link-row">
+            <a href={directionsUrl(pharmacy)} target="_blank" rel="noreferrer">
+              Get Directions
+            </a>
+            <a href={openMapsUrl(pharmacy)} target="_blank" rel="noreferrer">
+              Open in Maps
+            </a>
           </span>
         </div>
       );
@@ -55,23 +45,27 @@ const LocationLinks = ({ pharmacies }) => (
   </div>
 );
 
-function LeafletPharmacyMap({ pharmacies, height, userPos: userPosProp }) {
-  const detected = useUserLocation();
-  const userPos = userPosProp || detected;
-  const points = pharmacies.map(coords).filter(Boolean);
-  const center = userPos || points[0] || { lat: 20.5937, lng: 78.9629 };
+function LeafletPharmacyMap({ pharmacies, height, userPos }) {
+  const points = pharmacies.map(getPharmacyCoords).filter(Boolean);
+  const center = userPos || points[0] || INDIA_CENTER;
+  const mapKey = `${center.lat}:${center.lng}:${points.length}`;
 
   return (
     <>
-      <MapContainer center={[center.lat, center.lng]} zoom={points.length === 1 ? 14 : 11} style={{ height, width: '100%', borderRadius: '16px' }}>
-        <TileLayer attribution='&copy; OpenStreetMap' url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
+      <MapContainer
+        key={mapKey}
+        center={[center.lat, center.lng]}
+        zoom={points.length === 1 ? 14 : 11}
+        style={{ height, width: '100%', borderRadius: '16px' }}
+      >
+        <TileLayer attribution="&copy; OpenStreetMap" url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" />
         {userPos && (
           <Marker position={[userPos.lat, userPos.lng]}>
             <Popup>You are here</Popup>
           </Marker>
         )}
         {pharmacies.map((pharmacy) => {
-          const position = coords(pharmacy);
+          const position = getPharmacyCoords(pharmacy);
           if (!position) return null;
           const meds = pharmacy.availableMedicines || pharmacy.medicines || [];
           return (
@@ -82,12 +76,18 @@ function LeafletPharmacyMap({ pharmacies, height, userPos: userPosProp }) {
                 {pharmacy.address}, {pharmacy.city}
                 <br />
                 {pharmacy.phone || ''}
+                {pharmacy.distanceKm != null && (
+                  <>
+                    <br />
+                    {pharmacy.distanceKm.toFixed(1)} km away
+                  </>
+                )}
                 {meds.length > 0 && (
                   <>
                     <br />
                     <em>Available:</em>
                     {meds.slice(0, 6).map((m) => (
-                      <div key={m._id || m.name}>✓ {m.name}</div>
+                      <div key={m._id || m.name}>{m.name}</div>
                     ))}
                   </>
                 )}
@@ -103,6 +103,10 @@ function LeafletPharmacyMap({ pharmacies, height, userPos: userPosProp }) {
 
 const loadGoogleMaps = (apiKey) =>
   new Promise((resolve, reject) => {
+    if (!apiKey) {
+      reject(new Error('Google Maps unavailable'));
+      return;
+    }
     if (window.google?.maps) {
       resolve(window.google.maps);
       return;
@@ -123,13 +127,11 @@ const loadGoogleMaps = (apiKey) =>
     document.head.appendChild(script);
   });
 
-function GoogleMapsView({ pharmacies, height, userPos: userPosProp }) {
+function GoogleMapsView({ pharmacies, height, userPos, onUnavailable }) {
   const mapRef = useRef(null);
   const mapInstance = useRef(null);
   const markersRef = useRef([]);
   const userMarkerRef = useRef(null);
-  const detected = useUserLocation();
-  const userPos = userPosProp || detected;
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
 
   useEffect(() => {
@@ -139,8 +141,8 @@ function GoogleMapsView({ pharmacies, height, userPos: userPosProp }) {
       const maps = await loadGoogleMaps(apiKey);
       if (cancelled || !mapRef.current) return;
 
-      const points = pharmacies.map(coords).filter(Boolean);
-      const center = userPos || points[0] || { lat: 20.5937, lng: 78.9627 };
+      const points = pharmacies.map(getPharmacyCoords).filter(Boolean);
+      const center = userPos || points[0] || INDIA_CENTER;
 
       if (!mapInstance.current) {
         mapInstance.current = new maps.Map(mapRef.current, {
@@ -154,25 +156,26 @@ function GoogleMapsView({ pharmacies, height, userPos: userPosProp }) {
         mapInstance.current.setCenter(center);
       }
 
-      markersRef.current.forEach((m) => m.setMap(null));
+      markersRef.current.forEach((marker) => marker.setMap(null));
       markersRef.current = [];
 
       const bounds = new maps.LatLngBounds();
       pharmacies.forEach((pharmacy) => {
-        const position = coords(pharmacy);
+        const position = getPharmacyCoords(pharmacy);
         if (!position) return;
         bounds.extend(position);
         const marker = new maps.Marker({ position, map: mapInstance.current, title: pharmacy.name });
-        const dirUrl = `https://www.google.com/maps/dir/?api=1&destination=${position.lat},${position.lng}`;
-        const openUrl = `https://www.google.com/maps/search/?api=1&query=${position.lat},${position.lng}`;
+        const meds = pharmacy.availableMedicines || pharmacy.medicines || [];
         const info = new maps.InfoWindow({
-          content: `<div style="max-width:240px;font-family:Inter,sans-serif">
+          content: `<div style="max-width:260px;font-family:Inter,sans-serif">
             <strong>${pharmacy.name}</strong><br/>
             ${pharmacy.address || ''}<br/>
             ${pharmacy.city || ''}${pharmacy.state ? `, ${pharmacy.state}` : ''}<br/>
             ${pharmacy.phone ? `Tel: ${pharmacy.phone}<br/>` : ''}
-            <a href="${dirUrl}" target="_blank">Directions</a> ·
-            <a href="${openUrl}" target="_blank">Open in Google Maps</a>
+            ${pharmacy.distanceKm != null ? `${pharmacy.distanceKm.toFixed(1)} km away<br/>` : ''}
+            ${meds.length ? `<em>Available:</em> ${meds.slice(0, 4).map((m) => m.name).join(', ')}<br/>` : ''}
+            <a href="${directionsUrl(pharmacy)}" target="_blank">Get Directions</a> -
+            <a href="${openMapsUrl(pharmacy)}" target="_blank">Open in Maps</a>
           </div>`,
         });
         marker.addListener('click', () => info.open({ anchor: marker, map: mapInstance.current }));
@@ -199,11 +202,11 @@ function GoogleMapsView({ pharmacies, height, userPos: userPosProp }) {
       }
     };
 
-    init().catch((err) => console.error('[GooglePharmacyMap]', err));
+    init().catch(() => onUnavailable?.());
     return () => {
       cancelled = true;
     };
-  }, [apiKey, pharmacies, userPos]);
+  }, [apiKey, pharmacies, userPos, onUnavailable]);
 
   return (
     <>
@@ -215,34 +218,42 @@ function GoogleMapsView({ pharmacies, height, userPos: userPosProp }) {
 
 export default function GooglePharmacyMap({ pharmacies = [], height = 420, userLocation = null }) {
   const apiKey = import.meta.env.VITE_GOOGLE_MAPS_API_KEY;
-  const validPharmacies = pharmacies.filter((p) => coords(p));
+  const validPharmacies = pharmacies.filter((pharmacy) => getPharmacyCoords(pharmacy));
   const [mode, setMode] = useState(apiKey ? 'google' : 'leaflet');
+  const [fallbackNotice, setFallbackNotice] = useState('');
   const userPos =
-    userLocation && typeof userLocation.lat === 'number' && typeof userLocation.lng === 'number' && !userLocation.isFallback
+    userLocation && typeof userLocation.lat === 'number' && typeof userLocation.lng === 'number'
       ? { lat: userLocation.lat, lng: userLocation.lng }
       : null;
 
   useEffect(() => {
     setMode(apiKey ? 'google' : 'leaflet');
+    setFallbackNotice('');
   }, [apiKey]);
+
+  const handleGoogleUnavailable = useCallback(() => {
+    setFallbackNotice('Showing the fallback map view.');
+    setMode('leaflet');
+  }, []);
 
   if (validPharmacies.length === 0) {
     return (
       <div className="map-card google-map-card">
-        <p className="map-error">No pharmacy coordinates in database. Run the backend seed.</p>
+        <p className="map-error">No mapped pharmacy locations are available yet.</p>
       </div>
     );
   }
 
   return (
     <div className="map-card google-map-card">
-      {!apiKey && (
-        <p className="map-error">
-          VITE_GOOGLE_MAPS_API_KEY not set — showing OpenStreetMap. Add your key to frontend/.env for Google Maps.
-        </p>
-      )}
+      {fallbackNotice && <p className="map-error">{fallbackNotice}</p>}
       {mode === 'google' ? (
-        <GoogleMapsView pharmacies={validPharmacies} height={height} userPos={userPos} />
+        <GoogleMapsView
+          pharmacies={validPharmacies}
+          height={height}
+          userPos={userPos}
+          onUnavailable={handleGoogleUnavailable}
+        />
       ) : (
         <LeafletPharmacyMap pharmacies={validPharmacies} height={height} userPos={userPos} />
       )}

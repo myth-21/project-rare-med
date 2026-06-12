@@ -50,8 +50,6 @@ Rare Med aims to reduce the difficulty of finding medicines by helping users ide
 
 ### Notifications
 
-* Welcome Email
-* Password Reset Email
 * Availability Notifications
 
 ### User Dashboard
@@ -88,10 +86,6 @@ Rare Med aims to reduce the difficulty of finding medicines by helping users ide
 * Google OAuth
 * bcryptjs
 
-### Email Services
-
-* Nodemailer
-
 ### Maps
 
 * Google Maps API
@@ -119,7 +113,6 @@ MongoDB Database
         ▼
 Google OAuth
 Google Maps
-Nodemailer
 ```
 
 ---
@@ -267,7 +260,6 @@ npm install bcryptjs
 npm install jsonwebtoken
 npm install passport
 npm install passport-google-oauth20
-npm install nodemailer
 npm install multer
 npm install express-validator
 ```
@@ -323,11 +315,6 @@ ADMIN_PASSWORD=Admin@123
 GOOGLE_CLIENT_ID=your_google_client_id
 GOOGLE_CLIENT_SECRET=your_google_client_secret
 
-SMTP_HOST=smtp.gmail.com
-SMTP_PORT=587
-
-SMTP_USER=your_email
-SMTP_PASS=your_app_password
 ```
 
 ---
@@ -451,7 +438,6 @@ Users can allow location access to view pharmacies closest to their current loca
 
 ```text
 Register
-→ Welcome Email
 → Login
 → Dashboard
 ```

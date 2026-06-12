@@ -8,7 +8,7 @@ const Navbar = () => {
   const accountLinks = user?.isAdmin
     ? [['/admin', 'Admin Dashboard'], ['/admin/medicines', 'Manage Medicines'], ['/admin/reports', 'Manage Reports']]
     : user
-      ? [['/dashboard', 'Dashboard'], ['/profile', 'Profile']]
+      ? [['/profile', 'Profile']]
       : [['/login', 'Login'], ['/register', 'Register']];
 
   return (

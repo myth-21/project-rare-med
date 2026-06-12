@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom';
 import { pharmacyImage, resolveMediaUrl } from '../../utils/mediaUrl.js';
 import { formatDistance } from '../../utils/formatters.js';
+import { directionsUrl, openMapsUrl } from '../../utils/location.js';
 
 const PharmacyCard = ({ pharmacy }) => {
   const meds = pharmacy.availableMedicines || pharmacy.medicines || [];
@@ -14,7 +15,7 @@ const PharmacyCard = ({ pharmacy }) => {
           src={pharmacyImage(pharmacy)}
           alt={`${pharmacy.name} storefront`}
           onError={(e) => {
-            e.currentTarget.src = '/pharmacies/fallback.svg';
+            e.currentTarget.src = pharmacyImage({ name: pharmacy.name });
           }}
         />
         <img
@@ -39,17 +40,26 @@ const PharmacyCard = ({ pharmacy }) => {
       <p className="pharmacy-meta">{pharmacy.phone || 'Contact on details page'}</p>
       <p className="pharmacy-meta">{meds.length} medicines available</p>
       {meds.length > 0 && (
-        <p className="pharmacy-meds-preview">
-          {meds.slice(0, 4).map((m) => m.name).join(' · ')}
-          {meds.length > 4 ? ' …' : ''}
-        </p>
+        <div className="pharmacy-meds-preview">
+          {meds.slice(0, 4).map((medicine) => (
+            <span key={medicine._id || medicine.name}>{medicine.name}</span>
+          ))}
+        </div>
       )}
       <span className={`badge ${pharmacy.isVerified ? 'available' : 'limited'}`}>
         {pharmacy.isVerified ? 'Verified' : 'Pending'}
       </span>
-      <Link className="btn" to={`/pharmacies/${pharmacy._id}`}>
-        View Pharmacy
-      </Link>
+      <div className="pharmacy-card-actions">
+        <Link className="btn" to={`/pharmacies/${pharmacy._id}`}>
+          View Details
+        </Link>
+        <a className="btn outline" href={directionsUrl(pharmacy)} target="_blank" rel="noreferrer">
+          Get Directions
+        </a>
+        <a className="map-text-link" href={openMapsUrl(pharmacy)} target="_blank" rel="noreferrer">
+          Open in Maps
+        </a>
+      </div>
     </article>
   );
 };
